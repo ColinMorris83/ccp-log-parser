@@ -1,0 +1,99 @@
+{
+  "name": "ccp-log-parser",
+  "version": "1.0.0",
+  "description": "Standalone CCP log parser and debugger for Amazon Connect",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "tsc -b && vite build",
+    "lint": "concurrently --kill-others-on-fail \"npm run lint:js\" \"npm run lint:markdown\" \"npm run lint:prettier\"",
+    "lint:fix": "eslint --fix .",
+    "lint:js": "eslint --max-warnings 0 .",
+    "lint:markdown": "markdownlint -i node_modules ./",
+    "lint:prettier": "prettier --check \"./**/*.{js,json,md,ts,tsx,html}\"",
+    "prepare": "husky",
+    "prettier:fix": "prettier --write \"./**/*.{js,json,md,ts,tsx,html}\"",
+    "preview": "vite preview",
+    "start": "vite",
+    "test": "vitest run --coverage",
+    "test:watch": "vitest",
+    "version:major": "npm --no-git-tag-version version major",
+    "version:minor": "npm --no-git-tag-version version minor",
+    "version:patch": "npm --no-git-tag-version version patch"
+  },
+  "dependencies": {
+    "@emotion/react": "11.14.0",
+    "@emotion/styled": "11.14.1",
+    "@mui/icons-material": "9.0.0",
+    "@mui/material": "9.0.0",
+    "@mui/x-charts": "9.0.2",
+    "material-react-table": "3.2.1",
+    "react": "19.2.5",
+    "react-dom": "19.2.5"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "20.5.3",
+    "@commitlint/config-conventional": "20.5.3",
+    "@eslint-react/eslint-plugin": "4.2.3",
+    "@eslint/js": "10.0.1",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.2",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.1",
+    "@vitest/coverage-v8": "4.1.5",
+    "@vitest/eslint-plugin": "1.6.16",
+    "concurrently": "9.2.1",
+    "eslint": "10.2.1",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-import-resolver-typescript": "4.4.4",
+    "eslint-plugin-import-x": "4.16.2",
+    "eslint-plugin-jsdoc": "62.9.0",
+    "eslint-plugin-perfectionist": "5.9.0",
+    "eslint-plugin-react-refresh": "0.5.2",
+    "eslint-plugin-regexp": "3.1.0",
+    "eslint-plugin-unicorn": "64.0.0",
+    "globals": "17.5.0",
+    "happy-dom": "20.9.0",
+    "husky": "9.1.7",
+    "lint-staged": "16.4.0",
+    "markdownlint-cli": "0.48.0",
+    "prettier": "3.8.3",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.59.0",
+    "vite": "8.0.10",
+    "vitest": "4.1.5"
+  },
+  "overrides": {
+    "@mui/icons-material": "9.0.0",
+    "@mui/material": "9.0.0",
+    "react": "19.2.5",
+    "react-dom": "19.2.5"
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "commitlint": {
+    "extends": [
+      "@commitlint/config-conventional"
+    ]
+  },
+  "lint-staged": {
+    "*.{js,ts,tsx}": [
+      "eslint --quiet --max-warnings 0"
+    ],
+    "*.{js,ts,tsx,json,md,html}": [
+      "prettier --check"
+    ],
+    "*.md": "markdownlint"
+  }
+}
