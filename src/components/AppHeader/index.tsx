@@ -3,10 +3,43 @@ import DarkModeOutlinedIcon from '@mui/icons-material/DarkModeOutlined';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import GitHubIcon from '@mui/icons-material/GitHub';
 import LightModeOutlinedIcon from '@mui/icons-material/LightModeOutlined';
-import { AppBar, Box, Chip, IconButton, Stack, Toolbar, Tooltip, Typography, useColorScheme } from '@mui/material';
+import {
+  AppBar,
+  Box,
+  Chip,
+  IconButton,
+  keyframes,
+  Stack,
+  Toolbar,
+  Tooltip,
+  Typography,
+  useColorScheme,
+} from '@mui/material';
 import { type FC } from 'react';
 
 import { buildConfig } from '../../config';
+
+const spinIn = keyframes`
+  from {
+    opacity: 0;
+    transform: rotate(-90deg) scale(0.5);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(0deg) scale(1);
+  }
+`;
+
+const spinInReverse = keyframes`
+  from {
+    opacity: 0;
+    transform: rotate(90deg) scale(0.5);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(0deg) scale(1);
+  }
+`;
 
 interface AppHeaderProps {
   onOpenFilterManager: () => void;
@@ -79,7 +112,15 @@ const AppHeader: FC<AppHeaderProps> = ({ onOpenFilterManager }) => {
           </Tooltip>
           <Tooltip arrow title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}>
             <IconButton onClick={toggleTheme} size="small">
-              {isDark ? <LightModeOutlinedIcon fontSize="small" /> : <DarkModeOutlinedIcon fontSize="small" />}
+              {isDark ? (
+                <LightModeOutlinedIcon fontSize="small" key="light" sx={{ animation: `${spinIn} 0.4s ease-out` }} />
+              ) : (
+                <DarkModeOutlinedIcon
+                  fontSize="small"
+                  key="dark"
+                  sx={{ animation: `${spinInReverse} 0.4s ease-out` }}
+                />
+              )}
             </IconButton>
           </Tooltip>
         </Stack>
