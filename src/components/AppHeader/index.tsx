@@ -20,10 +20,12 @@ interface AppHeaderProps {
  * @returns JSX for the app header.
  */
 const AppHeader: FC<AppHeaderProps> = ({ onOpenFilterManager }) => {
-  const { mode, setMode } = useColorScheme();
+  const { mode, setMode, systemMode } = useColorScheme();
+
+  const isDark = mode === 'dark' || (mode === 'system' && systemMode === 'dark');
 
   const toggleTheme = (): void => {
-    setMode(mode === 'dark' ? 'light' : 'dark');
+    setMode(isDark ? 'light' : 'dark');
   };
 
   return (
@@ -75,9 +77,9 @@ const AppHeader: FC<AppHeaderProps> = ({ onOpenFilterManager }) => {
               <GitHubIcon fontSize="small" />
             </IconButton>
           </Tooltip>
-          <Tooltip arrow title={mode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}>
+          <Tooltip arrow title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}>
             <IconButton onClick={toggleTheme} size="small">
-              {mode === 'dark' ? <LightModeOutlinedIcon fontSize="small" /> : <DarkModeOutlinedIcon fontSize="small" />}
+              {isDark ? <LightModeOutlinedIcon fontSize="small" /> : <DarkModeOutlinedIcon fontSize="small" />}
             </IconButton>
           </Tooltip>
         </Stack>
