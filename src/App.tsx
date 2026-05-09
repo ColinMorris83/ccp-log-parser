@@ -1,50 +1,63 @@
 import { Box, CssBaseline, StyledEngineProvider, ThemeProvider } from '@mui/material';
-import { useState, type FC } from 'react';
+import { Outlet } from '@tanstack/react-router';
+import { type FC } from 'react';
 
 import AppHeader from './components/AppHeader';
-import CcpLogParser from './components/CcpLogParser';
 import FilterManager from './components/FilterManager';
-import { useCustomFilters } from './hooks/useCustomFilters';
+import { FilterProvider, useFilterContext } from './contexts/FilterContext';
 import { unifiedTheme } from './theme/unifiedTheme';
 
 /**
- * Root application component.
- * Wires together the MUI theme, custom filter state, header, filter manager dialog,
- * and the main CCP log parser page.
+ * Inner layout that consumes FilterContext to render the header and filter manager.
  *
- * @returns JSX for the full application.
+ * @returns JSX for the main layout shell.
  */
-const App: FC = () => {
-  const { addFilter, filters, removeFilter, updateFilter } = useCustomFilters();
-  const [filterManagerOpen, setFilterManagerOpen] = useState(false);
+const AppLayout: FC = () => {
+  const { addFilter, closeFilterManager, filterManagerOpen, filters, openFilterManager, removeFilter, updateFilter } =
+    useFilterContext();
 
   return (
-    <StyledEngineProvider injectFirst>
-      <ThemeProvider disableTransitionOnChange modeStorageKey="ccp-log-parser:mui-mode" noSsr theme={unifiedTheme}>
-        <CssBaseline />
-        <Box
-          sx={{
-            bgcolor: 'background.default',
-            display: 'flex',
-            flexDirection: 'column',
-            height: '100dvh',
-            overflow: 'hidden',
-          }}
-        >
-          <AppHeader onOpenFilterManager={() => setFilterManagerOpen(true)} />
-          <CcpLogParser customFilters={filters} onOpenFilterManager={() => setFilterManagerOpen(true)} />
-        </Box>
-        <FilterManager
-          filters={filters}
-          onAddFilter={addFilter}
-          onClose={() => setFilterManagerOpen(false)}
-          onRemoveFilter={removeFilter}
-          onUpdateFilter={updateFilter}
-          open={filterManagerOpen}
-        />
-      </ThemeProvider>
-    </StyledEngineProvider>
+    <>
+      <Box
+        sx={{
+          bgcolor: 'background.default',
+          display: 'flex',
+          flexDirection: 'column',
+          height: '100dvh',
+          overflow: 'hidden',
+        }}
+      >
+        <AppHeader onOpenFilterManager={openFilterManager} />
+        <Outlet />
+      </Box>
+      <FilterManager
+        filters={filters}
+        onAddFilter={addFilter}
+        onClose={closeFilterManager}
+        onRemoveFilter={removeFilter}
+        onUpdateFilter={updateFilter}
+        open={filterManagerOpen}
+      />
+    </>
   );
 };
+
+/**
+ * Root application component.
+ * Wraps the layout with MUI theme, CSS baseline, and the filter context provider.
+ * Child routes render into the `<Outlet />` inside AppLayout.
+ *
+ * @returns JSX for the full application shell.
+ */
+const App: FC = () => (
+  <StyledEngineProvider injectFirst>
+    <ThemeProvider disableTransitionOnChange modeStorageKey="ccp-log-parser:mui-mode" noSsr theme={unifiedTheme}>
+      <CssBaseline />
+      <FilterProvider>
+        <AppLayout />
+      </FilterProvider>
+    </ThemeProvider>
+  </StyledEngineProvider>
+);
 
 export default App;

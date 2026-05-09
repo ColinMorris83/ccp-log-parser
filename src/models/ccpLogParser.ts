@@ -83,6 +83,10 @@ export interface ApiLatencyPoint {
 export interface SkewPoint {
   /** Epoch ms of the snapshot entry */
   _ts: number;
+  /** ISO timestamp from the agent workstation (log entry time) */
+  localTime: string;
+  /** ISO timestamp from the Amazon Connect server (snapshotTimestamp) */
+  serverTime: string;
   /** Skew value in milliseconds */
   skewMs: number;
   /** Agent state name at this snapshot (e.g. Available, Busy) */
@@ -118,7 +122,95 @@ export interface ParsedCcpLog {
   filename: string;
   skewPoints: SkewPoint[];
   snapshots: AgentSnapshot[];
+  /** Periodic softphone stream metrics collected during a call (empty if no softphone data) */
+  softphoneMetrics: SoftphoneMetricPoint[];
+  /** Softphone call report extracted at call end (null if no softphone call in log) */
+  softphoneReport: null | SoftphoneCallReport;
   warnCount: number;
+}
+
+/**
+ * Stream direction for softphone audio metrics.
+ */
+export type SoftphoneStreamType = 'audio_input' | 'audio_output';
+
+/**
+ * A single softphone audio metric sample, logged once per second during a call.
+ * Each sample covers one stream direction (input = mic, output = speaker).
+ */
+export interface SoftphoneMetricPoint {
+  /** Audio level (unitless, higher = louder; 0 = silence) */
+  audioLevel: number;
+  /** Number of audio concealment events (gap-filling due to lost packets) */
+  concealmentEvents: number;
+  /** Echo return loss in dB (negative values are normal) */
+  echoReturnLoss: number;
+  /** Echo return loss enhancement in dB */
+  echoReturnLossEnhancement: number;
+  /** Jitter buffer delay in milliseconds */
+  jitterBufferDelayMs: number;
+  /** Jitter buffer size in milliseconds */
+  jitterBufferMs: number;
+  /** Number of packets received/sent since last sample */
+  packetsCount: number;
+  /** Number of packets lost since last sample */
+  packetsLost: number;
+  /** Round-trip time to the media server in milliseconds */
+  roundTripTimeMs: number;
+  /** Whether this is microphone input or speaker output */
+  streamType: SoftphoneStreamType;
+  /** ISO timestamp of this metric sample */
+  timestamp: string;
+}
+
+/**
+ * End-of-call softphone report summarising call setup, duration, and any failures.
+ */
+export interface SoftphoneCallReport {
+  /** ISO timestamp when the call ended */
+  callEndTime: string;
+  /** ISO timestamp when the call started */
+  callStartTime: string;
+  /** Time spent cleaning up after the call (ms) */
+  cleanupTimeMs: null | number;
+  /** Whether an offer creation failure occurred */
+  createOfferFailure: boolean;
+  /** Whether a getUserMedia failure occurred (non-timeout) */
+  gumOtherFailure: boolean;
+  /** Time to acquire the microphone via getUserMedia (ms) */
+  gumTimeMs: number;
+  /** Whether getUserMedia timed out */
+  gumTimeoutFailure: boolean;
+  /** Whether the handshake failed */
+  handshakingFailure: boolean;
+  /** Time to complete the DTLS handshake (ms) */
+  handshakingTimeMs: number;
+  /** Whether ICE candidate collection failed */
+  iceCollectionFailure: boolean;
+  /** Time to collect ICE candidates (ms) */
+  iceCollectionTimeMs: number;
+  /** Time to initialise the peer connection (ms) */
+  initializationTimeMs: number;
+  /** Whether an invalid remote SDP was received */
+  invalidRemoteSDPFailure: boolean;
+  /** Whether no remote ICE candidates were received */
+  noRemoteIceCandidateFailure: boolean;
+  /** Time between connection and first audio (ms) */
+  preTalkingTimeMs: number;
+  /** Whether setLocalDescription failed */
+  setLocalDescriptionFailure: boolean;
+  /** Whether setRemoteDescription failed */
+  setRemoteDescriptionFailure: boolean;
+  /** Whether the signalling connection failed */
+  signallingConnectionFailure: boolean;
+  /** Time to establish the signalling connection (ms) */
+  signallingConnectTimeMs: number;
+  /** Final stream statistics at call end */
+  streamStatistics: SoftphoneMetricPoint[];
+  /** Total talking/connected time (ms) */
+  talkingTimeMs: number;
+  /** Whether the agent was busy when the call arrived */
+  userBusyFailure: boolean;
 }
 
 /**

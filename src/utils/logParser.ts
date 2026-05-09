@@ -6,6 +6,9 @@ import type {
   EnrichedLogEntry,
   ParsedCcpLog,
   SkewPoint,
+  SoftphoneCallReport,
+  SoftphoneMetricPoint,
+  SoftphoneStreamType,
 } from '../models/ccpLogParser';
 
 /**
@@ -14,6 +17,10 @@ import type {
 const API_CALL_RE = /AWSClient:\s*-->\s*(?:Calling operation\s*)?'(\w+)'/;
 const API_REPLY_RE = /AWSClient:\s*<--\s*(?:Operation\s*)?'(\w+)'\s*(succeeded|failed)/;
 const SNAPSHOT_GET_RE = /GET_AGENT_SNAPSHOT\s+succeeded/i;
+/** Matches periodic softphone metrics: "sendSoftphoneMetrics success[...]" */
+const SOFTPHONE_METRICS_RE = /sendSoftphoneMetrics\s+success(\[.+)$/;
+/** Matches end-of-call softphone report: "sendSoftphoneReport success{...}" */
+const SOFTPHONE_REPORT_RE = /sendSoftphoneReport\s+success(\{.+)$/;
 /** UUID capture group string (used inside larger regexes) */
 const UUID_CAP = '([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})';
 /** Matches a standalone UUID — used for quick object-value checks */
@@ -40,11 +47,77 @@ const CONTACT_ID_TEXT_RES = [
 interface SnapshotObject {
   snapshot?: {
     skew?: number;
+    snapshotTimestamp?: string;
     state?: {
       name?: string;
     };
   };
 }
+
+/**
+ * Raw softphone stream metric as found in the CCP log JSON.
+ */
+interface RawSoftphoneStream {
+  audioLevel?: number;
+  concealmentEvents?: number;
+  echoReturnLoss?: number;
+  echoReturnLossEnhancement?: number;
+  jitterBufferDelayMilliseconds?: null | number;
+  jitterBufferMillis?: number;
+  packetsCount?: number;
+  packetsLost?: number;
+  roundTripTimeMillis?: number;
+  softphoneStreamType?: string;
+  timestamp?: string;
+}
+
+/**
+ * Raw softphone call report as found in the CCP log JSON.
+ */
+interface RawSoftphoneReport {
+  callEndTime?: string;
+  callStartTime?: string;
+  cleanupTimeMillis?: null | number;
+  createOfferFailure?: boolean;
+  gumOtherFailure?: boolean;
+  gumTimeMillis?: number;
+  gumTimeoutFailure?: boolean;
+  handshakingFailure?: boolean;
+  handshakingTimeMillis?: number;
+  iceCollectionFailure?: boolean;
+  iceCollectionTimeMillis?: number;
+  initializationTimeMillis?: number;
+  invalidRemoteSDPFailure?: boolean;
+  noRemoteIceCandidateFailure?: boolean;
+  preTalkingTimeMillis?: number;
+  setLocalDescriptionFailure?: boolean;
+  setRemoteDescriptionFailure?: boolean;
+  signallingConnectionFailure?: boolean;
+  signallingConnectTimeMillis?: number;
+  softphoneStreamStatistics?: RawSoftphoneStream[];
+  talkingTimeMillis?: number;
+  userBusyFailure?: boolean;
+}
+
+/**
+ * Maps a raw softphone stream metric to the normalised SoftphoneMetricPoint shape.
+ *
+ * @param raw - Raw stream metric from CCP log JSON.
+ * @returns Normalised metric point.
+ */
+const mapStreamMetric = (raw: RawSoftphoneStream): SoftphoneMetricPoint => ({
+  audioLevel: raw.audioLevel ?? 0,
+  concealmentEvents: raw.concealmentEvents ?? 0,
+  echoReturnLoss: raw.echoReturnLoss ?? 0,
+  echoReturnLossEnhancement: raw.echoReturnLossEnhancement ?? 0,
+  jitterBufferDelayMs: raw.jitterBufferDelayMilliseconds ?? 0,
+  jitterBufferMs: raw.jitterBufferMillis ?? 0,
+  packetsCount: raw.packetsCount ?? 0,
+  packetsLost: raw.packetsLost ?? 0,
+  roundTripTimeMs: raw.roundTripTimeMillis ?? 0,
+  streamType: (raw.softphoneStreamType ?? 'audio_output') as SoftphoneStreamType,
+  timestamp: raw.timestamp ?? '',
+});
 
 /**
  * Recursively walks an object/array, collecting values of any key named `contactId`
@@ -164,6 +237,10 @@ export const parseCcpLog = (raw: string, filename: string): ParsedCcpLog => {
   const snapshots: AgentSnapshot[] = [];
   const apiLatency: ApiLatencyPoint[] = [];
   const skewPoints: SkewPoint[] = [];
+  const softphoneMetrics: SoftphoneMetricPoint[] = [];
+  let softphoneReport: null | SoftphoneCallReport = null;
+  /** Tracks seen softphone metric timestamps to deduplicate (logs often contain duplicates) */
+  const seenMetricTimestamps = new Set<string>();
 
   const pendingSends = new Map<string, { _key: number; _ts: number }[]>();
 
@@ -228,12 +305,74 @@ export const parseCcpLog = (raw: string, filename: string): ParsedCcpLog => {
       });
 
       if (typeof skew === 'number') {
-        skewPoints.push({ _ts: entry._ts, skewMs: skew, stateName });
+        skewPoints.push({
+          _ts: entry._ts,
+          localTime: entry.time,
+          serverTime: snapshotObj?.snapshotTimestamp ?? entry.time,
+          skewMs: skew,
+          stateName,
+        });
+      }
+    }
+
+    // Extract periodic softphone metrics
+    const metricsMatch = SOFTPHONE_METRICS_RE.exec(entry.text);
+    if (metricsMatch) {
+      try {
+        const rawStreams = JSON.parse(metricsMatch[1]) as RawSoftphoneStream[];
+        for (const stream of rawStreams) {
+          const key = `${stream.timestamp ?? ''}_${stream.softphoneStreamType ?? ''}`;
+          if (!seenMetricTimestamps.has(key)) {
+            seenMetricTimestamps.add(key);
+            softphoneMetrics.push(mapStreamMetric(stream));
+          }
+        }
+      } catch {
+        // Malformed JSON — skip silently
+      }
+    }
+
+    // Extract end-of-call softphone report
+    if (!softphoneReport) {
+      const reportMatch = SOFTPHONE_REPORT_RE.exec(entry.text);
+      if (reportMatch) {
+        try {
+          const raw = JSON.parse(reportMatch[1]) as RawSoftphoneReport;
+          softphoneReport = {
+            callEndTime: raw.callEndTime ?? '',
+            callStartTime: raw.callStartTime ?? '',
+            cleanupTimeMs: raw.cleanupTimeMillis ?? null,
+            createOfferFailure: raw.createOfferFailure ?? false,
+            gumOtherFailure: raw.gumOtherFailure ?? false,
+            gumTimeMs: raw.gumTimeMillis ?? 0,
+            gumTimeoutFailure: raw.gumTimeoutFailure ?? false,
+            handshakingFailure: raw.handshakingFailure ?? false,
+            handshakingTimeMs: raw.handshakingTimeMillis ?? 0,
+            iceCollectionFailure: raw.iceCollectionFailure ?? false,
+            iceCollectionTimeMs: raw.iceCollectionTimeMillis ?? 0,
+            initializationTimeMs: raw.initializationTimeMillis ?? 0,
+            invalidRemoteSDPFailure: raw.invalidRemoteSDPFailure ?? false,
+            noRemoteIceCandidateFailure: raw.noRemoteIceCandidateFailure ?? false,
+            preTalkingTimeMs: raw.preTalkingTimeMillis ?? 0,
+            setLocalDescriptionFailure: raw.setLocalDescriptionFailure ?? false,
+            setRemoteDescriptionFailure: raw.setRemoteDescriptionFailure ?? false,
+            signallingConnectionFailure: raw.signallingConnectionFailure ?? false,
+            signallingConnectTimeMs: raw.signallingConnectTimeMillis ?? 0,
+            streamStatistics: (raw.softphoneStreamStatistics ?? []).map(mapStreamMetric),
+            talkingTimeMs: raw.talkingTimeMillis ?? 0,
+            userBusyFailure: raw.userBusyFailure ?? false,
+          };
+        } catch {
+          // Malformed JSON — skip silently
+        }
       }
     }
 
     entries.push(entry);
   }
+
+  // Sort softphone metrics by timestamp for chronological charting
+  softphoneMetrics.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
 
   return {
     apiLatency,
@@ -243,6 +382,8 @@ export const parseCcpLog = (raw: string, filename: string): ParsedCcpLog => {
     filename,
     skewPoints,
     snapshots,
+    softphoneMetrics,
+    softphoneReport,
     warnCount,
   };
 };

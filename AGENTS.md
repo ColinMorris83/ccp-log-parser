@@ -3,7 +3,7 @@
 ## Project Overview
 
 React 19 SPA (TypeScript 6, Vite 8, MUI 9) for parsing and debugging Amazon Connect CCP log files.
-No routing, no backend, no auth — purely client-side. Deployed to GitHub Pages via GitHub Actions.
+Hash-based routing via TanStack Router, no backend, no auth — purely client-side. Deployed to GitHub Pages via GitHub Actions.
 
 ## Build / Lint / Test Commands
 
@@ -37,20 +37,23 @@ No routing, no backend, no auth — purely client-side. Deployed to GitHub Pages
 ```text
 src/
   components/         -- UI components (PascalCase folders, index.tsx entry)
-    AppHeader/        -- Header bar with version chip, theme toggle, filter button
+    AppHeader/        -- Header bar with version chip, theme toggle, guide link
     CcpLogParser/     -- Main page: orchestrates table, metrics, snapshots, filters
     DropZone/         -- Drag-and-drop file upload with loading backdrop
     FileUploadButton/ -- File picker button
     FilterManager/    -- CRUD dialog for custom source filters
+    Guide/            -- Built-in usage guide and documentation page
     LogTable/         -- Virtualised log table (material-react-table)
-    MetricsPanel/     -- Error/warning/entry count chips
+    MetricsPanel/     -- Charts: clock skew, API latency, WebRTC softphone metrics
     MrtThemeProvider/ -- Theme wrapper for material-react-table
     SegmentedTabs/    -- Multi-file tab switcher
     SnapshotList/     -- Clickable agent snapshot navigation
   config.ts           -- Build config (version from VITE_APP_VERSION)
   constants/          -- Shared constants (MRT theme colours)
+  contexts/           -- React context providers (FilterContext)
   hooks/              -- Custom hooks (useCustomFilters, useMrtTheme)
   models/             -- TypeScript interfaces and types
+  router.tsx          -- TanStack Router config (hash history, route tree)
   theme/              -- MUI unified theme (light + dark colour schemes)
   utils/              -- Pure functions (log parser, localStorage helpers)
 ```
@@ -144,7 +147,8 @@ Vitest + React Testing Library + `@testing-library/jest-dom` matchers.
 
 ## Key Architecture Notes
 
-- **No routing** — single-page tool, no React Router
+- **Hash-based routing** via TanStack Router (`/#/` and `/#/guide`) for GitHub Pages compatibility
 - **No server state** — all data is client-side (parsed from dropped files)
+- **Filter state** shared via `FilterContext` (React context) between AppHeader and CcpLogParser
 - **Custom filters** persisted to localStorage with `ccp-log-parser:` key prefix
 - **Theme** uses MUI's built-in `ThemeProvider` with `useColorScheme()` for dark/light toggle — no external state management

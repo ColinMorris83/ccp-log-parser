@@ -2,6 +2,7 @@ import ArticleOutlinedIcon from '@mui/icons-material/ArticleOutlined';
 import DarkModeOutlinedIcon from '@mui/icons-material/DarkModeOutlined';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import GitHubIcon from '@mui/icons-material/GitHub';
+import HelpOutlinedIcon from '@mui/icons-material/HelpOutlined';
 import LightModeOutlinedIcon from '@mui/icons-material/LightModeOutlined';
 import {
   AppBar,
@@ -15,6 +16,7 @@ import {
   Typography,
   useColorScheme,
 } from '@mui/material';
+import { Link } from '@tanstack/react-router';
 import { type FC } from 'react';
 
 import { buildConfig } from '../../config';
@@ -108,6 +110,11 @@ const AppHeader: FC<AppHeaderProps> = ({ onOpenFilterManager }) => {
               target="_blank"
             >
               <GitHubIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          <Tooltip arrow title="Usage guide">
+            <IconButton component={Link} size="small" to="/guide">
+              <HelpOutlinedIcon fontSize="small" />
             </IconButton>
           </Tooltip>
           <Tooltip arrow title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}>

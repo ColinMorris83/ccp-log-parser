@@ -23,6 +23,7 @@ const DropArea = styled(Box, {
   borderRadius: theme.shape.borderRadius,
   cursor: 'pointer',
   display: 'flex',
+  flex: 1,
   flexDirection: 'column',
   gap: theme.spacing(2),
   justifyContent: 'center',

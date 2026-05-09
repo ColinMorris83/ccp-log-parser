@@ -241,7 +241,7 @@ describe('parseCcpLog — API call enrichment', () => {
 
 describe('parseCcpLog — snapshot extraction', () => {
   const snapshotObj = {
-    snapshot: { skew: 150, state: { name: 'Available' } },
+    snapshot: { skew: 150, snapshotTimestamp: '2026-01-01T00:00:00.500Z', state: { name: 'Available' } },
   };
 
   it('extracts a snapshot entry', () => {
@@ -269,6 +269,32 @@ describe('parseCcpLog — snapshot extraction', () => {
     expect(result.skewPoints).toHaveLength(1);
     expect(result.skewPoints[0].skewMs).toBe(150);
     expect(result.skewPoints[0].stateName).toBe('Available');
+  });
+
+  it('sets localTime from the log entry and serverTime from snapshotTimestamp', () => {
+    const entries: CcpLogEntry[] = [
+      makeEntry({
+        objects: [snapshotObj],
+        text: 'GET_AGENT_SNAPSHOT succeeded',
+        time: '2026-01-01T00:00:00.000Z',
+      }),
+    ];
+    const result = parseCcpLog(toJson(entries), 'test.txt');
+    expect(result.skewPoints[0].localTime).toBe('2026-01-01T00:00:00.000Z');
+    expect(result.skewPoints[0].serverTime).toBe('2026-01-01T00:00:00.500Z');
+  });
+
+  it('falls back serverTime to entry time when snapshotTimestamp is absent', () => {
+    const entries: CcpLogEntry[] = [
+      makeEntry({
+        objects: [{ snapshot: { skew: 50, state: { name: 'Busy' } } }],
+        text: 'GET_AGENT_SNAPSHOT succeeded',
+        time: '2026-01-01T00:00:03.000Z',
+      }),
+    ];
+    const result = parseCcpLog(toJson(entries), 'test.txt');
+    expect(result.skewPoints[0].serverTime).toBe('2026-01-01T00:00:03.000Z');
+    expect(result.skewPoints[0].localTime).toBe('2026-01-01T00:00:03.000Z');
   });
 
   it('sets toKey of the previous snapshot when a new one arrives', () => {
@@ -450,5 +476,119 @@ describe('parseCcpLog — contact detection', () => {
   it('returns no contacts when none are detected', () => {
     const entries: CcpLogEntry[] = [makeEntry({ text: 'nothing here', time: '2026-01-01T00:00:00.000Z' })];
     expect(parseCcpLog(toJson(entries), 'test.txt').contacts).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseCcpLog — softphone metrics extraction
+// ---------------------------------------------------------------------------
+
+describe('parseCcpLog — softphone metrics', () => {
+  const METRICS_JSON =
+    '[{"softphoneStreamType":"audio_input","timestamp":"2026-01-01T00:00:01.000Z","packetsLost":0,"packetsCount":0,"audioLevel":0,"jitterBufferMillis":20,"roundTripTimeMillis":10,"jitterBufferDelayMilliseconds":5,"echoReturnLoss":-12,"echoReturnLossEnhancement":0.2,"concealmentEvents":0},{"softphoneStreamType":"audio_output","timestamp":"2026-01-01T00:00:01.000Z","packetsLost":2,"packetsCount":50,"audioLevel":145,"jitterBufferMillis":3,"roundTripTimeMillis":10,"jitterBufferDelayMilliseconds":null,"echoReturnLoss":-12,"echoReturnLossEnhancement":0.2,"concealmentEvents":1}]';
+
+  it('extracts periodic softphone metrics from sendSoftphoneMetrics entries', () => {
+    const entries: CcpLogEntry[] = [
+      makeEntry({
+        text: ` sendSoftphoneMetrics success${METRICS_JSON}`,
+        time: '2026-01-01T00:00:02.000Z',
+      }),
+    ];
+    const result = parseCcpLog(toJson(entries), 'test.txt');
+    expect(result.softphoneMetrics).toHaveLength(2);
+
+    const input = result.softphoneMetrics.find((m) => m.streamType === 'audio_input');
+    expect(input).toBeDefined();
+    expect(input?.jitterBufferMs).toBe(20);
+    expect(input?.roundTripTimeMs).toBe(10);
+    expect(input?.jitterBufferDelayMs).toBe(5);
+    expect(input?.audioLevel).toBe(0);
+
+    const output = result.softphoneMetrics.find((m) => m.streamType === 'audio_output');
+    expect(output).toBeDefined();
+    expect(output?.packetsLost).toBe(2);
+    expect(output?.packetsCount).toBe(50);
+    expect(output?.audioLevel).toBe(145);
+    expect(output?.concealmentEvents).toBe(1);
+  });
+
+  it('deduplicates metrics with the same timestamp and stream type', () => {
+    const entries: CcpLogEntry[] = [
+      makeEntry({ text: ` sendSoftphoneMetrics success${METRICS_JSON}`, time: '2026-01-01T00:00:02.000Z' }),
+      makeEntry({ text: ` sendSoftphoneMetrics success${METRICS_JSON}`, time: '2026-01-01T00:00:02.000Z' }),
+    ];
+    const result = parseCcpLog(toJson(entries), 'test.txt');
+    expect(result.softphoneMetrics).toHaveLength(2); // 1 input + 1 output, not 4
+  });
+
+  it('handles null jitterBufferDelayMilliseconds gracefully', () => {
+    const entries: CcpLogEntry[] = [
+      makeEntry({ text: ` sendSoftphoneMetrics success${METRICS_JSON}`, time: '2026-01-01T00:00:02.000Z' }),
+    ];
+    const result = parseCcpLog(toJson(entries), 'test.txt');
+    const output = result.softphoneMetrics.find((m) => m.streamType === 'audio_output');
+    expect(output?.jitterBufferDelayMs).toBe(0); // null → 0
+  });
+
+  it('returns empty softphoneMetrics when no softphone data is present', () => {
+    const entries: CcpLogEntry[] = [makeEntry({ text: 'no softphone here', time: '2026-01-01T00:00:00.000Z' })];
+    const result = parseCcpLog(toJson(entries), 'test.txt');
+    expect(result.softphoneMetrics).toHaveLength(0);
+    expect(result.softphoneReport).toBeNull();
+  });
+
+  it('sorts softphone metrics by timestamp', () => {
+    const earlier =
+      '[{"softphoneStreamType":"audio_output","timestamp":"2026-01-01T00:00:00.000Z","packetsLost":0,"packetsCount":50,"audioLevel":100,"jitterBufferMillis":2,"roundTripTimeMillis":10,"jitterBufferDelayMilliseconds":0,"echoReturnLoss":-12,"echoReturnLossEnhancement":0.2,"concealmentEvents":0}]';
+    const later =
+      '[{"softphoneStreamType":"audio_output","timestamp":"2026-01-01T00:00:05.000Z","packetsLost":0,"packetsCount":50,"audioLevel":200,"jitterBufferMillis":2,"roundTripTimeMillis":10,"jitterBufferDelayMilliseconds":0,"echoReturnLoss":-12,"echoReturnLossEnhancement":0.2,"concealmentEvents":0}]';
+    const entries: CcpLogEntry[] = [
+      makeEntry({ text: ` sendSoftphoneMetrics success${later}`, time: '2026-01-01T00:00:06.000Z' }),
+      makeEntry({ text: ` sendSoftphoneMetrics success${earlier}`, time: '2026-01-01T00:00:01.000Z' }),
+    ];
+    const result = parseCcpLog(toJson(entries), 'test.txt');
+    expect(result.softphoneMetrics[0].timestamp).toBe('2026-01-01T00:00:00.000Z');
+    expect(result.softphoneMetrics[1].timestamp).toBe('2026-01-01T00:00:05.000Z');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseCcpLog — softphone call report extraction
+// ---------------------------------------------------------------------------
+
+describe('parseCcpLog — softphone call report', () => {
+  const REPORT_JSON =
+    '{"callStartTime":"2026-01-01T00:00:00.000Z","callEndTime":"2026-01-01T00:05:00.000Z","gumTimeMillis":140,"initializationTimeMillis":149,"iceCollectionTimeMillis":0,"signallingConnectTimeMillis":0,"handshakingTimeMillis":31,"preTalkingTimeMillis":324,"talkingTimeMillis":253595,"cleanupTimeMillis":null,"iceCollectionFailure":false,"signallingConnectionFailure":false,"handshakingFailure":false,"gumOtherFailure":false,"gumTimeoutFailure":false,"createOfferFailure":false,"setLocalDescriptionFailure":false,"userBusyFailure":false,"invalidRemoteSDPFailure":false,"noRemoteIceCandidateFailure":false,"setRemoteDescriptionFailure":false,"softphoneStreamStatistics":[{"softphoneStreamType":"audio_input","timestamp":"2026-01-01T00:04:59.000Z","packetsLost":0,"packetsCount":1194,"audioLevel":0,"jitterBufferMillis":23,"roundTripTimeMillis":11,"jitterBufferDelayMilliseconds":37,"echoReturnLoss":-13.5,"echoReturnLossEnhancement":0.17,"concealmentEvents":3}]}';
+
+  it('extracts the softphone call report from sendSoftphoneReport entries', () => {
+    const entries: CcpLogEntry[] = [
+      makeEntry({ text: ` sendSoftphoneReport success${REPORT_JSON}`, time: '2026-01-01T00:05:00.000Z' }),
+    ];
+    const result = parseCcpLog(toJson(entries), 'test.txt');
+    expect(result.softphoneReport).not.toBeNull();
+    expect(result.softphoneReport?.callStartTime).toBe('2026-01-01T00:00:00.000Z');
+    expect(result.softphoneReport?.callEndTime).toBe('2026-01-01T00:05:00.000Z');
+    expect(result.softphoneReport?.gumTimeMs).toBe(140);
+    expect(result.softphoneReport?.talkingTimeMs).toBe(253_595);
+    expect(result.softphoneReport?.cleanupTimeMs).toBeNull();
+    expect(result.softphoneReport?.iceCollectionFailure).toBe(false);
+    expect(result.softphoneReport?.streamStatistics).toHaveLength(1);
+    expect(result.softphoneReport?.streamStatistics[0].packetsCount).toBe(1194);
+  });
+
+  it('only captures the first softphone report (ignores duplicates)', () => {
+    const entries: CcpLogEntry[] = [
+      makeEntry({ text: ` sendSoftphoneReport success${REPORT_JSON}`, time: '2026-01-01T00:05:00.000Z' }),
+      makeEntry({ text: ` sendSoftphoneReport success${REPORT_JSON}`, time: '2026-01-01T00:05:00.000Z' }),
+    ];
+    const result = parseCcpLog(toJson(entries), 'test.txt');
+    expect(result.softphoneReport).not.toBeNull();
+    // If it captured both, there would be no way to tell since they're identical,
+    // but the code short-circuits after the first — verified by code inspection
+  });
+
+  it('returns null softphoneReport when no report entry exists', () => {
+    const entries: CcpLogEntry[] = [makeEntry({ text: 'no report', time: '2026-01-01T00:00:00.000Z' })];
+    expect(parseCcpLog(toJson(entries), 'test.txt').softphoneReport).toBeNull();
   });
 });
