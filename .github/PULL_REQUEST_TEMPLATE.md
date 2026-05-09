@@ -13,6 +13,7 @@
 
 ## Checklist
 
+- [ ] Incremented the package version (if applicable)
 - [ ] My code follows the code style of this project
 - [ ] I have added tests to cover my changes (if applicable)
 - [ ] All new and existing tests pass
