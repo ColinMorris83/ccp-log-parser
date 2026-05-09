@@ -20,13 +20,7 @@ const App: FC = () => {
 
   return (
     <StyledEngineProvider injectFirst>
-      <ThemeProvider
-        defaultMode="dark"
-        disableTransitionOnChange
-        modeStorageKey="ccp-log-parser:mui-mode"
-        noSsr
-        theme={unifiedTheme}
-      >
+      <ThemeProvider disableTransitionOnChange modeStorageKey="ccp-log-parser:mui-mode" noSsr theme={unifiedTheme}>
         <CssBaseline />
         <Box
           sx={{
