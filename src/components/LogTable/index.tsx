@@ -323,8 +323,8 @@ const LogTable: FC<LogTableProps> = ({
         accessorKey: 'time',
         Cell: TimeCell,
         header: 'Time',
-        maxSize: 70,
-        size: 70,
+        maxSize: 40,
+        size: 40,
         sortingFn: (rowA, rowB) => rowA.original._ts - rowB.original._ts,
       },
       {
@@ -333,8 +333,8 @@ const LogTable: FC<LogTableProps> = ({
         enableSorting: false,
         filterVariant: 'multi-select',
         header: 'Component',
-        maxSize: 40,
-        size: 40,
+        maxSize: 25,
+        size: 25,
       },
       {
         accessorKey: 'level',
@@ -342,8 +342,8 @@ const LogTable: FC<LogTableProps> = ({
         enableSorting: false,
         filterVariant: 'multi-select',
         header: 'Level',
-        maxSize: 35,
-        size: 35,
+        maxSize: 15,
+        size: 15,
       },
       {
         accessorKey: 'text',

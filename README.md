@@ -4,6 +4,7 @@ A standalone React SPA for parsing and debugging Amazon Connect CCP (Contact Con
 
 ## Table of Contents
 
+- [Screenshots](#screenshots)
 - [Features](#features)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
@@ -13,16 +14,38 @@ A standalone React SPA for parsing and debugging Amazon Connect CCP (Contact Con
 - [Deployment](#deployment)
 - [Contributing](#contributing)
 
+## Screenshots
+
+### Drop zone
+
+Drag and drop one or more CCP log files, or use the file picker.
+
+![Drop zone](public/images/dropzone.png)
+
+### Log table
+
+Sortable, filterable log entries with snapshot navigation, contact filtering, and inline exception details.
+
+![Log table](public/images/log-table.png)
+
+### Metrics charts
+
+Clock skew, API latency, and WebRTC softphone metrics with interactive tooltips and time-range zoom.
+
+![Metrics charts](public/images/metrics.png)
+
 ## Features
 
 - **Drag & drop file loading** — drop one or more CCP log files onto the page, or use the file picker
 - **Log table** — sortable, filterable, virtualised table powered by Material React Table
 - **Custom source filters** — create, edit, and delete filters with custom label/prefix pairs; persisted to localStorage
 - **Contact filter** — filter log entries by contact ID
-- **Metrics panel** — at-a-glance counts for errors, warnings, and total entries with interactive chips
+- **Metrics charts** — clock skew over time, API latency (time-series and aggregated), and WebRTC softphone metrics (audio levels, packets, jitter buffer, round-trip time) with interactive tooltips and warning indicators
+- **WebRTC time-range zoom** — slider to zoom into a portion of a softphone call; shared across input/output stream tabs
 - **Snapshot navigation** — click API snapshots to jump directly to the corresponding log entry
 - **Inline exception summaries** — exception details shown inline without expanding the row
 - **Dark / light mode** — toggle between themes; preference persisted automatically
+- **Built-in usage guide** — comprehensive documentation accessible from the app header ([view guide](https://colinmorris83.github.io/ccp-log-parser/#/guide))
 
 ## Prerequisites
 
@@ -59,6 +82,7 @@ The dev server starts on <http://localhost:3100>.
 | Build tool        | Vite 8                           |
 | Component library | MUI 9, Material React Table 3    |
 | Charts            | MUI X Charts 9                   |
+| Routing           | TanStack Router 1                |
 | Testing           | Vitest 4, React Testing Library  |
 | Formatting        | Prettier 3                       |
 | Linting           | ESLint 10                        |
@@ -69,17 +93,19 @@ The dev server starts on <http://localhost:3100>.
 ```text
 src/
   components/         -- UI components
-    AppHeader/        -- Top bar with title, version, theme toggle, filter button
+    AppHeader/        -- Top bar with title, version, theme toggle, guide link
     CcpLogParser/     -- Main page: orchestrates log table, metrics, snapshots
     DropZone/         -- Drag-and-drop file upload area
     FileUploadButton/ -- File picker button
     FilterManager/    -- CRUD dialog for custom source filters
+    Guide/            -- Built-in usage guide and documentation page
     LogTable/         -- Virtualised log table with filtering and row expansion
-    MetricsPanel/     -- Error/warning/entry count chips
+    MetricsPanel/     -- Charts: clock skew, API latency, WebRTC softphone metrics
     MrtThemeProvider/ -- Material React Table theme wrapper
     SegmentedTabs/    -- Tab switcher for multi-file views
     SnapshotList/     -- Clickable API snapshot navigation list
   constants/          -- Shared constant values
+  contexts/           -- React context providers (FilterContext)
   hooks/              -- Custom React hooks (useCustomFilters, useMrtTheme)
   models/             -- TypeScript interfaces and types
   theme/              -- MUI theme configuration (light + dark)

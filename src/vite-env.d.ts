@@ -5,6 +5,8 @@ interface ViteTypeOptions {
 }
 
 interface ImportMetaEnv {
+  /** Base public path, set by Vite's `base` config option. */
+  readonly BASE_URL: string;
   readonly VITE_APP_VERSION?: string;
 }
 

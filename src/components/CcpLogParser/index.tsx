@@ -21,7 +21,8 @@ import { useMemo, useRef, useState, type FC } from 'react';
 
 import { FileUploadButton } from '../FileUploadButton';
 import { SegmentedTabCompact, SegmentedTabsCompact } from '../SegmentedTabs';
-import type { CustomFilter, LogLevel, ParsedCcpLog } from '../../models/ccpLogParser';
+import type { LogLevel, ParsedCcpLog } from '../../models/ccpLogParser';
+import { useFilterContext } from '../../contexts/FilterContext';
 import DropZone from '../DropZone';
 import LogTable from '../LogTable';
 import MetricsPanel from '../MetricsPanel';
@@ -55,25 +56,17 @@ interface LoadedFile {
   sourceFilterId: null | string;
 }
 
-interface CcpLogParserProps {
-  /** All available custom filters for the source filter dropdown. */
-  customFilters: CustomFilter[];
-  /** Callback to open the filter manager dialog. */
-  onOpenFilterManager: () => void;
-}
-
 /**
  * Renders the CCP Log Parser main page.
  * Supports loading multiple CCP log files and switching between them.
  * Each file gets its own filterable log table, snapshot panel, and metrics charts.
  * Active source filter is tracked per-file via `sourceFilterId` on LoadedFile.
+ * Custom filters and the filter manager callback are consumed from FilterContext.
  *
- * @param root0 Component props.
- * @param root0.customFilters All available custom filters.
- * @param root0.onOpenFilterManager Callback to open the filter manager dialog.
  * @returns JSX for the CCP log parser page.
  */
-const CcpLogParser: FC<CcpLogParserProps> = ({ customFilters, onOpenFilterManager }) => {
+const CcpLogParser: FC = () => {
+  const { filters: customFilters, openFilterManager } = useFilterContext();
   const [loadedFiles, setLoadedFiles] = useState<LoadedFile[]>([]);
   const [selectedFileIdx, setSelectedFileIdx] = useState(0);
   const [parseError, setParseError] = useState<null | string>(null);
@@ -593,11 +586,11 @@ const CcpLogParser: FC<CcpLogParserProps> = ({ customFilters, onOpenFilterManage
       </Box>
 
       {/* ── Main panel (fills remaining height) ── */}
-      <Box sx={{ flex: 1, minHeight: 0, overflow: 'hidden', p: 3, pt: 1.5 }}>
+      <Box sx={{ display: 'flex', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden', p: 3, pt: 1.5 }}>
         {/* Empty state */}
         {loadedFiles.length === 0 && (
-          <Card>
-            <CardContent>
+          <Card sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
+            <CardContent sx={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
               <DropZone maxFiles={MAX_LOADED_FILES} onFilesLoad={handleFilesLoad} />
             </CardContent>
           </Card>
@@ -657,7 +650,7 @@ const CcpLogParser: FC<CcpLogParserProps> = ({ customFilters, onOpenFilterManage
                   levelFilter={currentFile.levelFilter}
                   onContactFilterChange={handleContactFilterChange}
                   onLevelFilterChange={handleLevelFilterChange}
-                  onOpenFilterManager={onOpenFilterManager}
+                  onOpenFilterManager={openFilterManager}
                   onSourceFilterChange={handleSourceFilterChange}
                 />
               </CardContent>
@@ -672,6 +665,8 @@ const CcpLogParser: FC<CcpLogParserProps> = ({ customFilters, onOpenFilterManage
               <MetricsPanel
                 apiLatency={currentFile.parsedLog.apiLatency}
                 skewPoints={currentFile.parsedLog.skewPoints}
+                softphoneMetrics={currentFile.parsedLog.softphoneMetrics}
+                softphoneReport={currentFile.parsedLog.softphoneReport}
               />
             </CardContent>
           </Card>
