@@ -56,34 +56,24 @@ interface LoadedFile {
 }
 
 interface CcpLogParserProps {
-  /** The currently active custom filter (resolved from activeFilterId). */
-  activeFilter: CustomFilter | null;
   /** All available custom filters for the source filter dropdown. */
   customFilters: CustomFilter[];
   /** Callback to open the filter manager dialog. */
   onOpenFilterManager: () => void;
-  /** Callback to update the active source filter ID. */
-  onSourceFilterChange: (filterId: null | string) => void;
 }
 
 /**
  * Renders the CCP Log Parser main page.
  * Supports loading multiple CCP log files and switching between them.
  * Each file gets its own filterable log table, snapshot panel, and metrics charts.
+ * Active source filter is tracked per-file via `sourceFilterId` on LoadedFile.
  *
  * @param root0 Component props.
- * @param root0.activeFilter The currently active custom filter (or null for All).
  * @param root0.customFilters All available custom filters.
  * @param root0.onOpenFilterManager Callback to open the filter manager dialog.
- * @param root0.onSourceFilterChange Callback to update the active source filter.
  * @returns JSX for the CCP log parser page.
  */
-const CcpLogParser: FC<CcpLogParserProps> = ({
-  activeFilter,
-  customFilters,
-  onOpenFilterManager,
-  onSourceFilterChange,
-}) => {
+const CcpLogParser: FC<CcpLogParserProps> = ({ customFilters, onOpenFilterManager }) => {
   const [loadedFiles, setLoadedFiles] = useState<LoadedFile[]>([]);
   const [selectedFileIdx, setSelectedFileIdx] = useState(0);
   const [parseError, setParseError] = useState<null | string>(null);
@@ -93,6 +83,8 @@ const CcpLogParser: FC<CcpLogParserProps> = ({
   const dragCounterRef = useRef(0);
 
   const currentFile = loadedFiles[selectedFileIdx] as LoadedFile | undefined;
+
+  const activeFilter = customFilters.find((f) => f.id === currentFile?.sourceFilterId) ?? null;
 
   const entries = currentFile?.parsedLog.entries;
   const contactFilter = currentFile?.contactFilter;
@@ -124,6 +116,10 @@ const CcpLogParser: FC<CcpLogParserProps> = ({
 
   const updateCurrentFile = (updater: (file: LoadedFile) => LoadedFile): void => {
     setLoadedFiles((prev) => prev.map((f, i) => (i === selectedFileIdx ? updater(f) : f)));
+  };
+
+  const handleSourceFilterChange = (filterId: null | string): void => {
+    updateCurrentFile((file) => ({ ...file, sourceFilterId: filterId }));
   };
 
   const handleFilesLoad = (results: { filename: string; raw: string }[], skippedAtMax: string[]): void => {
@@ -294,7 +290,6 @@ const CcpLogParser: FC<CcpLogParserProps> = ({
         sourceFilterId: null,
       };
     });
-    onSourceFilterChange(null);
   };
 
   const handleViewTabChange = (_event: unknown, value: ViewTabValue): void => {
@@ -663,7 +658,7 @@ const CcpLogParser: FC<CcpLogParserProps> = ({
                   onContactFilterChange={handleContactFilterChange}
                   onLevelFilterChange={handleLevelFilterChange}
                   onOpenFilterManager={onOpenFilterManager}
-                  onSourceFilterChange={onSourceFilterChange}
+                  onSourceFilterChange={handleSourceFilterChange}
                 />
               </CardContent>
             </Card>

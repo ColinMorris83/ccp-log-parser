@@ -15,7 +15,7 @@ import { unifiedTheme } from './theme/unifiedTheme';
  * @returns JSX for the full application.
  */
 const App: FC = () => {
-  const { activeFilter, addFilter, filters, removeFilter, setActiveFilterId, updateFilter } = useCustomFilters();
+  const { addFilter, filters, removeFilter, updateFilter } = useCustomFilters();
   const [filterManagerOpen, setFilterManagerOpen] = useState(false);
 
   return (
@@ -38,12 +38,7 @@ const App: FC = () => {
           }}
         >
           <AppHeader onOpenFilterManager={() => setFilterManagerOpen(true)} />
-          <CcpLogParser
-            activeFilter={activeFilter}
-            customFilters={filters}
-            onOpenFilterManager={() => setFilterManagerOpen(true)}
-            onSourceFilterChange={setActiveFilterId}
-          />
+          <CcpLogParser customFilters={filters} onOpenFilterManager={() => setFilterManagerOpen(true)} />
         </Box>
         <FilterManager
           filters={filters}
