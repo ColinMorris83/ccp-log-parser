@@ -1,5 +1,7 @@
+import ArticleOutlinedIcon from '@mui/icons-material/ArticleOutlined';
 import DarkModeOutlinedIcon from '@mui/icons-material/DarkModeOutlined';
 import FilterListIcon from '@mui/icons-material/FilterList';
+import GitHubIcon from '@mui/icons-material/GitHub';
 import LightModeOutlinedIcon from '@mui/icons-material/LightModeOutlined';
 import { AppBar, Box, Chip, IconButton, Stack, Toolbar, Tooltip, Typography, useColorScheme } from '@mui/material';
 import { type FC } from 'react';
@@ -38,6 +40,7 @@ const AppHeader: FC<AppHeaderProps> = ({ onOpenFilterManager }) => {
       }}
     >
       <Toolbar sx={{ gap: 1.5, minHeight: '56px !important' }}>
+        <ArticleOutlinedIcon sx={{ fontSize: '2rem' }} />
         <Typography
           component="h1"
           sx={{
@@ -59,6 +62,17 @@ const AppHeader: FC<AppHeaderProps> = ({ onOpenFilterManager }) => {
           <Tooltip arrow title="Manage custom filters">
             <IconButton onClick={onOpenFilterManager} size="small">
               <FilterListIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          <Tooltip arrow title="View source on GitHub">
+            <IconButton
+              component="a"
+              href="https://github.com/ColinMorris83/ccp-log-parser"
+              rel="noopener noreferrer"
+              size="small"
+              target="_blank"
+            >
+              <GitHubIcon fontSize="small" />
             </IconButton>
           </Tooltip>
           <Tooltip arrow title={mode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}>

@@ -1,6 +1,6 @@
 {
   "name": "ccp-log-parser",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Standalone CCP log parser and debugger for Amazon Connect",
   "type": "module",
   "private": true,
