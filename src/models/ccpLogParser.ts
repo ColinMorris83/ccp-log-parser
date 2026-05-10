@@ -124,8 +124,10 @@ export interface ParsedCcpLog {
   snapshots: AgentSnapshot[];
   /** Periodic softphone stream metrics collected during a call (empty if no softphone data) */
   softphoneMetrics: SoftphoneMetricPoint[];
-  /** Softphone call report extracted at call end (null if no softphone call in log) */
-  softphoneReport: null | SoftphoneCallReport;
+  /** Softphone call reports extracted at call end (one per call; empty if no softphone calls in log) */
+  softphoneReports: SoftphoneCallReport[];
+  /** Number of orphaned API sends discarded because no reply arrived within 30 seconds */
+  staleApiSendCount: number;
   warnCount: number;
 }
 

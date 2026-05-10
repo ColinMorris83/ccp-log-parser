@@ -17,6 +17,8 @@ import type {
 const API_CALL_RE = /AWSClient:\s*-->\s*(?:Calling operation\s*)?'(\w+)'/;
 const API_REPLY_RE = /AWSClient:\s*<--\s*(?:Operation\s*)?'(\w+)'\s*(succeeded|failed)/;
 const SNAPSHOT_GET_RE = /GET_AGENT_SNAPSHOT\s+succeeded/i;
+/** SENDs older than this are considered orphaned and discarded when matching REPLYs */
+const MAX_REASONABLE_LATENCY_MS = 30_000;
 /** Matches periodic softphone metrics: "sendSoftphoneMetrics success[...]" */
 const SOFTPHONE_METRICS_RE = /sendSoftphoneMetrics\s+success(\[.+)$/;
 /** Matches end-of-call softphone report: "sendSoftphoneReport success{...}" */
@@ -238,14 +240,17 @@ export const parseCcpLog = (raw: string, filename: string): ParsedCcpLog => {
   const apiLatency: ApiLatencyPoint[] = [];
   const skewPoints: SkewPoint[] = [];
   const softphoneMetrics: SoftphoneMetricPoint[] = [];
-  let softphoneReport: null | SoftphoneCallReport = null;
+  const softphoneReports: SoftphoneCallReport[] = [];
   /** Tracks seen softphone metric timestamps to deduplicate (logs often contain duplicates) */
   const seenMetricTimestamps = new Set<string>();
+  /** Tracks seen softphone reports to deduplicate (CCP often sends the same report twice) */
+  const seenReportKeys = new Set<string>();
 
   const pendingSends = new Map<string, { _key: number; _ts: number }[]>();
 
   let errorCount = 0;
   let warnCount = 0;
+  let staleApiSendCount = 0;
 
   for (const [idx, raw] of sorted.entries()) {
     const entry: EnrichedLogEntry = { ...raw, _key: idx, contactIds: [], text: raw.text.trim() };
@@ -274,6 +279,11 @@ export const parseCcpLog = (raw: string, filename: string): ParsedCcpLog => {
       entry.apiName = apiName;
       entry.highlight = status === 'failed';
       const queue = pendingSends.get(apiName);
+      // Drain stale sends that are too old to be the matching pair
+      while (queue && queue.length > 0 && entry._ts - queue[0]._ts > MAX_REASONABLE_LATENCY_MS) {
+        queue.shift();
+        staleApiSendCount++;
+      }
       const send = queue?.shift();
       if (send) {
         apiLatency.push({
@@ -332,39 +342,43 @@ export const parseCcpLog = (raw: string, filename: string): ParsedCcpLog => {
       }
     }
 
-    // Extract end-of-call softphone report
-    if (!softphoneReport) {
-      const reportMatch = SOFTPHONE_REPORT_RE.exec(entry.text);
-      if (reportMatch) {
-        try {
-          const raw = JSON.parse(reportMatch[1]) as RawSoftphoneReport;
-          softphoneReport = {
-            callEndTime: raw.callEndTime ?? '',
-            callStartTime: raw.callStartTime ?? '',
-            cleanupTimeMs: raw.cleanupTimeMillis ?? null,
-            createOfferFailure: raw.createOfferFailure ?? false,
-            gumOtherFailure: raw.gumOtherFailure ?? false,
-            gumTimeMs: raw.gumTimeMillis ?? 0,
-            gumTimeoutFailure: raw.gumTimeoutFailure ?? false,
-            handshakingFailure: raw.handshakingFailure ?? false,
-            handshakingTimeMs: raw.handshakingTimeMillis ?? 0,
-            iceCollectionFailure: raw.iceCollectionFailure ?? false,
-            iceCollectionTimeMs: raw.iceCollectionTimeMillis ?? 0,
-            initializationTimeMs: raw.initializationTimeMillis ?? 0,
-            invalidRemoteSDPFailure: raw.invalidRemoteSDPFailure ?? false,
-            noRemoteIceCandidateFailure: raw.noRemoteIceCandidateFailure ?? false,
-            preTalkingTimeMs: raw.preTalkingTimeMillis ?? 0,
-            setLocalDescriptionFailure: raw.setLocalDescriptionFailure ?? false,
-            setRemoteDescriptionFailure: raw.setRemoteDescriptionFailure ?? false,
-            signallingConnectionFailure: raw.signallingConnectionFailure ?? false,
-            signallingConnectTimeMs: raw.signallingConnectTimeMillis ?? 0,
-            streamStatistics: (raw.softphoneStreamStatistics ?? []).map(mapStreamMetric),
-            talkingTimeMs: raw.talkingTimeMillis ?? 0,
-            userBusyFailure: raw.userBusyFailure ?? false,
-          };
-        } catch {
-          // Malformed JSON — skip silently
+    // Extract end-of-call softphone report (deduplicated by callStartTime + callEndTime)
+    const reportMatch = SOFTPHONE_REPORT_RE.exec(entry.text);
+    if (reportMatch) {
+      try {
+        const raw = JSON.parse(reportMatch[1]) as RawSoftphoneReport;
+        const reportKey = `${raw.callStartTime ?? ''}|${raw.callEndTime ?? ''}`;
+        if (seenReportKeys.has(reportKey)) {
+          entries.push(entry);
+          continue;
         }
+        seenReportKeys.add(reportKey);
+        softphoneReports.push({
+          callEndTime: raw.callEndTime ?? '',
+          callStartTime: raw.callStartTime ?? '',
+          cleanupTimeMs: raw.cleanupTimeMillis ?? null,
+          createOfferFailure: raw.createOfferFailure ?? false,
+          gumOtherFailure: raw.gumOtherFailure ?? false,
+          gumTimeMs: raw.gumTimeMillis ?? 0,
+          gumTimeoutFailure: raw.gumTimeoutFailure ?? false,
+          handshakingFailure: raw.handshakingFailure ?? false,
+          handshakingTimeMs: raw.handshakingTimeMillis ?? 0,
+          iceCollectionFailure: raw.iceCollectionFailure ?? false,
+          iceCollectionTimeMs: raw.iceCollectionTimeMillis ?? 0,
+          initializationTimeMs: raw.initializationTimeMillis ?? 0,
+          invalidRemoteSDPFailure: raw.invalidRemoteSDPFailure ?? false,
+          noRemoteIceCandidateFailure: raw.noRemoteIceCandidateFailure ?? false,
+          preTalkingTimeMs: raw.preTalkingTimeMillis ?? 0,
+          setLocalDescriptionFailure: raw.setLocalDescriptionFailure ?? false,
+          setRemoteDescriptionFailure: raw.setRemoteDescriptionFailure ?? false,
+          signallingConnectionFailure: raw.signallingConnectionFailure ?? false,
+          signallingConnectTimeMs: raw.signallingConnectTimeMillis ?? 0,
+          streamStatistics: (raw.softphoneStreamStatistics ?? []).map(mapStreamMetric),
+          talkingTimeMs: raw.talkingTimeMillis ?? 0,
+          userBusyFailure: raw.userBusyFailure ?? false,
+        });
+      } catch {
+        // Malformed JSON — skip silently
       }
     }
 
@@ -383,7 +397,8 @@ export const parseCcpLog = (raw: string, filename: string): ParsedCcpLog => {
     skewPoints,
     snapshots,
     softphoneMetrics,
-    softphoneReport,
+    softphoneReports,
+    staleApiSendCount,
     warnCount,
   };
 };

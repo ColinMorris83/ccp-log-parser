@@ -72,6 +72,7 @@ describe('parseCcpLog — input validation', () => {
     expect(result.contacts).toHaveLength(0);
     expect(result.errorCount).toBe(0);
     expect(result.warnCount).toBe(0);
+    expect(result.staleApiSendCount).toBe(0);
   });
 });
 
@@ -232,6 +233,33 @@ describe('parseCcpLog — API call enrichment', () => {
     expect(result.apiLatency).toHaveLength(2);
     expect(result.apiLatency[0].latencyMs).toBe(2000);
     expect(result.apiLatency[1].latencyMs).toBe(2000);
+  });
+
+  it('discards stale sends older than 30 seconds when matching a reply', () => {
+    const entries: CcpLogEntry[] = [
+      // Orphaned send — never gets a reply
+      makeEntry({ text: "AWSClient: --> 'createTransport'", time: '2026-01-01T00:00:00.000Z' }),
+      // Fresh send + reply 2 minutes later — the orphaned send should be drained
+      makeEntry({ text: "AWSClient: --> 'createTransport'", time: '2026-01-01T00:02:00.000Z' }),
+      makeEntry({ text: "AWSClient: <-- 'createTransport' succeeded", time: '2026-01-01T00:02:01.000Z' }),
+    ];
+    const result = parseCcpLog(toJson(entries), 'test.txt');
+    expect(result.apiLatency).toHaveLength(1);
+    expect(result.apiLatency[0].latencyMs).toBe(1000);
+    expect(result.staleApiSendCount).toBe(1);
+  });
+
+  it('drains multiple stale sends before matching', () => {
+    const entries: CcpLogEntry[] = [
+      makeEntry({ text: "AWSClient: --> 'createTransport'", time: '2026-01-01T00:00:00.000Z' }),
+      makeEntry({ text: "AWSClient: --> 'createTransport'", time: '2026-01-01T00:00:05.000Z' }),
+      makeEntry({ text: "AWSClient: --> 'createTransport'", time: '2026-01-01T00:05:00.000Z' }),
+      makeEntry({ text: "AWSClient: <-- 'createTransport' succeeded", time: '2026-01-01T00:05:02.000Z' }),
+    ];
+    const result = parseCcpLog(toJson(entries), 'test.txt');
+    expect(result.apiLatency).toHaveLength(1);
+    expect(result.apiLatency[0].latencyMs).toBe(2000);
+    expect(result.staleApiSendCount).toBe(2);
   });
 });
 
@@ -534,7 +562,7 @@ describe('parseCcpLog — softphone metrics', () => {
     const entries: CcpLogEntry[] = [makeEntry({ text: 'no softphone here', time: '2026-01-01T00:00:00.000Z' })];
     const result = parseCcpLog(toJson(entries), 'test.txt');
     expect(result.softphoneMetrics).toHaveLength(0);
-    expect(result.softphoneReport).toBeNull();
+    expect(result.softphoneReports).toHaveLength(0);
   });
 
   it('sorts softphone metrics by timestamp', () => {
@@ -565,30 +593,44 @@ describe('parseCcpLog — softphone call report', () => {
       makeEntry({ text: ` sendSoftphoneReport success${REPORT_JSON}`, time: '2026-01-01T00:05:00.000Z' }),
     ];
     const result = parseCcpLog(toJson(entries), 'test.txt');
-    expect(result.softphoneReport).not.toBeNull();
-    expect(result.softphoneReport?.callStartTime).toBe('2026-01-01T00:00:00.000Z');
-    expect(result.softphoneReport?.callEndTime).toBe('2026-01-01T00:05:00.000Z');
-    expect(result.softphoneReport?.gumTimeMs).toBe(140);
-    expect(result.softphoneReport?.talkingTimeMs).toBe(253_595);
-    expect(result.softphoneReport?.cleanupTimeMs).toBeNull();
-    expect(result.softphoneReport?.iceCollectionFailure).toBe(false);
-    expect(result.softphoneReport?.streamStatistics).toHaveLength(1);
-    expect(result.softphoneReport?.streamStatistics[0].packetsCount).toBe(1194);
+    expect(result.softphoneReports).toHaveLength(1);
+    expect(result.softphoneReports[0].callStartTime).toBe('2026-01-01T00:00:00.000Z');
+    expect(result.softphoneReports[0].callEndTime).toBe('2026-01-01T00:05:00.000Z');
+    expect(result.softphoneReports[0].gumTimeMs).toBe(140);
+    expect(result.softphoneReports[0].talkingTimeMs).toBe(253_595);
+    expect(result.softphoneReports[0].cleanupTimeMs).toBeNull();
+    expect(result.softphoneReports[0].iceCollectionFailure).toBe(false);
+    expect(result.softphoneReports[0].streamStatistics).toHaveLength(1);
+    expect(result.softphoneReports[0].streamStatistics[0].packetsCount).toBe(1194);
   });
 
-  it('only captures the first softphone report (ignores duplicates)', () => {
+  it('captures multiple softphone reports from separate calls', () => {
+    const REPORT_JSON_2 =
+      '{"callStartTime":"2026-01-01T00:10:00.000Z","callEndTime":"2026-01-01T00:15:00.000Z","gumTimeMillis":200,"initializationTimeMillis":100,"iceCollectionTimeMillis":50,"signallingConnectTimeMillis":30,"handshakingTimeMillis":40,"preTalkingTimeMillis":500,"talkingTimeMillis":300000,"cleanupTimeMillis":10,"iceCollectionFailure":false,"signallingConnectionFailure":false,"handshakingFailure":false,"gumOtherFailure":false,"gumTimeoutFailure":false,"createOfferFailure":false,"setLocalDescriptionFailure":false,"userBusyFailure":false,"invalidRemoteSDPFailure":false,"noRemoteIceCandidateFailure":false,"setRemoteDescriptionFailure":false,"softphoneStreamStatistics":[]}';
     const entries: CcpLogEntry[] = [
       makeEntry({ text: ` sendSoftphoneReport success${REPORT_JSON}`, time: '2026-01-01T00:05:00.000Z' }),
-      makeEntry({ text: ` sendSoftphoneReport success${REPORT_JSON}`, time: '2026-01-01T00:05:00.000Z' }),
+      makeEntry({ text: ` sendSoftphoneReport success${REPORT_JSON_2}`, time: '2026-01-01T00:15:00.000Z' }),
     ];
     const result = parseCcpLog(toJson(entries), 'test.txt');
-    expect(result.softphoneReport).not.toBeNull();
-    // If it captured both, there would be no way to tell since they're identical,
-    // but the code short-circuits after the first — verified by code inspection
+    expect(result.softphoneReports).toHaveLength(2);
+    expect(result.softphoneReports[0].callStartTime).toBe('2026-01-01T00:00:00.000Z');
+    expect(result.softphoneReports[0].talkingTimeMs).toBe(253_595);
+    expect(result.softphoneReports[1].callStartTime).toBe('2026-01-01T00:10:00.000Z');
+    expect(result.softphoneReports[1].talkingTimeMs).toBe(300_000);
   });
 
-  it('returns null softphoneReport when no report entry exists', () => {
+  it('returns empty softphoneReports when no report entry exists', () => {
     const entries: CcpLogEntry[] = [makeEntry({ text: 'no report', time: '2026-01-01T00:00:00.000Z' })];
-    expect(parseCcpLog(toJson(entries), 'test.txt').softphoneReport).toBeNull();
+    expect(parseCcpLog(toJson(entries), 'test.txt').softphoneReports).toHaveLength(0);
+  });
+
+  it('deduplicates identical softphone reports for the same call', () => {
+    const entries: CcpLogEntry[] = [
+      makeEntry({ text: ` sendSoftphoneReport success${REPORT_JSON}`, time: '2026-01-01T00:05:00.000Z' }),
+      makeEntry({ text: ` sendSoftphoneReport success${REPORT_JSON}`, time: '2026-01-01T00:05:01.000Z' }),
+    ];
+    const result = parseCcpLog(toJson(entries), 'test.txt');
+    expect(result.softphoneReports).toHaveLength(1);
+    expect(result.softphoneReports[0].callStartTime).toBe('2026-01-01T00:00:00.000Z');
   });
 });

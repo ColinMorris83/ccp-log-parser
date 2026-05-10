@@ -1,4 +1,23 @@
-import { Box, Button, Chip, Collapse, Link, Paper, Slider, Stack, Tab, Tabs, Typography } from '@mui/material';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
+  Alert,
+  Box,
+  Button,
+  Chip,
+  Collapse,
+  Divider,
+  Link,
+  Paper,
+  Slider,
+  Stack,
+  Tab,
+  Tabs,
+  Tooltip,
+  Typography,
+} from '@mui/material';
 import { useDrawingArea, useXScale } from '@mui/x-charts';
 import { BarChart } from '@mui/x-charts/BarChart';
 import { ChartsTooltipContainer, useAxesTooltip } from '@mui/x-charts/ChartsTooltip';
@@ -23,6 +42,8 @@ const SKEW_WARNING_THRESHOLD = 1_000;
 /** API names excluded from latency charts (already represented in the skew chart) */
 const LATENCY_API_FILTER = new Set(['getAgentSnapshot']);
 const LATENCY_WARNING_THRESHOLD = 500;
+/** Setup time (ms) above which an individual call is flagged as concerning */
+const SETUP_WARNING_THRESHOLD = 1_000;
 
 /** Colour palette for agent state — used for legend swatches and chart background bands */
 const STATE_COLORS: Record<string, string> = {
@@ -52,13 +73,14 @@ type WebRtcStreamTab = 'audio_input' | 'audio_output';
 /** React context used to pass skew data into the custom tooltip component */
 const SkewDataContext = createContext<SkewPoint[]>([]);
 
-/** Intl options for tooltip timestamps (HH:mm:ss.SSS) */
+/** Intl options for tooltip timestamps (HH:mm:ss.SSS, UTC) */
 const TOOLTIP_TIME_FORMAT: Intl.DateTimeFormatOptions = {
   fractionalSecondDigits: 3,
   hour: '2-digit',
   hour12: false,
   minute: '2-digit',
   second: '2-digit',
+  timeZone: 'UTC',
 };
 
 /**
@@ -218,14 +240,11 @@ const CustomLatencyTooltip: FC = () => {
   );
 };
 
-/** Minimal interface for the d3 point scale returned by useXScale */
-interface PointScale {
-  (value: string): number | undefined;
-  step(): number;
-}
+/** Type for the d3 time scale returned by useXScale */
+type TimeScale = (value: Date) => number;
 
 interface StateBackgroundBandsProps {
-  labels: string[];
+  dates: Date[];
   skewPoints: SkewPoint[];
 }
 
@@ -233,28 +252,31 @@ interface StateBackgroundBandsProps {
  * Renders coloured background bands as SVG rects inside a LineChart.
  *
  * @param root0 Component props.
- * @param root0.labels X-axis label array (same order as skewPoints).
+ * @param root0.dates X-axis Date array (same order as skewPoints).
  * @param root0.skewPoints Parsed skew data points with stateName.
  * @returns SVG rect elements, one per contiguous state period.
  */
-const StateBackgroundBands: FC<StateBackgroundBandsProps> = ({ labels, skewPoints }) => {
+const StateBackgroundBands: FC<StateBackgroundBandsProps> = ({ dates, skewPoints }) => {
   const { height, left, top, width } = useDrawingArea();
-  const xScale = useXScale() as unknown as PointScale;
+  const xScale = useXScale() as unknown as TimeScale;
 
   const n = skewPoints.length;
-  if (n === 0 || typeof xScale.step !== 'function') return null;
+  if (n === 0) return null;
 
-  const halfStep = xScale.step() / 2;
   const bands: { color: string; endX: number; startX: number }[] = [];
   let bandStart = 0;
   for (let i = 1; i <= n; i++) {
     if (i === n || skewPoints[i].stateName !== skewPoints[i - 1].stateName) {
-      const x0 = xScale(labels[bandStart]) ?? left;
-      const x1 = xScale(labels[Math.min(i - 1, n - 1)]) ?? left + width;
+      const x0 = xScale(dates[bandStart]);
+      const x1 = xScale(dates[Math.min(i - 1, n - 1)]);
+      // Use midpoint between adjacent data points as the band edge;
+      // first band starts at drawing area left, last band ends at drawing area right.
+      const midBefore = bandStart > 0 ? (xScale(dates[bandStart - 1]) + x0) / 2 : left;
+      const midAfter = i < n ? (x1 + xScale(dates[i])) / 2 : left + width;
       bands.push({
         color: STATE_COLORS[skewPoints[bandStart].stateName] ?? DEFAULT_STATE_COLOR,
-        endX: i < n ? x1 + halfStep : left + width,
-        startX: bandStart > 0 ? x0 - halfStep : left,
+        endX: midAfter,
+        startX: midBefore,
       });
       bandStart = i;
     }
@@ -281,7 +303,10 @@ interface MetricsPanelProps {
   apiLatency: ApiLatencyPoint[];
   skewPoints: SkewPoint[];
   softphoneMetrics: SoftphoneMetricPoint[];
-  softphoneReport: null | SoftphoneCallReport;
+  /** Softphone call reports extracted at call end (one per call) */
+  softphoneReports: SoftphoneCallReport[];
+  /** Number of orphaned API sends that were discarded during parsing */
+  staleApiSendCount: number;
 }
 
 const EmptyMetric: FC<{ message: string }> = ({ message }) => (
@@ -316,10 +341,17 @@ const EmptyMetric: FC<{ message: string }> = ({ message }) => (
  * @param root0.apiLatency Array of API latency measurements.
  * @param root0.skewPoints Array of skew measurements over time.
  * @param root0.softphoneMetrics Periodic softphone audio metrics (empty if no softphone call).
- * @param root0.softphoneReport End-of-call softphone summary (null if no softphone call).
+ * @param root0.softphoneReports Softphone call reports (one per call; empty if no calls).
+ * @param root0.staleApiSendCount Number of orphaned API sends discarded during parsing.
  * @returns JSX for the metrics panel component.
  */
-const MetricsPanel: FC<MetricsPanelProps> = ({ apiLatency, skewPoints, softphoneMetrics, softphoneReport }) => {
+const MetricsPanel: FC<MetricsPanelProps> = ({
+  apiLatency,
+  skewPoints,
+  softphoneMetrics,
+  softphoneReports,
+  staleApiSendCount,
+}) => {
   const [skewInfoOpen, setSkewInfoOpen] = useState(false);
   const [latencyTimeSeriesInfoOpen, setLatencyTimeSeriesInfoOpen] = useState(false);
   const [latencyAggregatedInfoOpen, setLatencyAggregatedInfoOpen] = useState(false);
@@ -337,18 +369,7 @@ const MetricsPanel: FC<MetricsPanelProps> = ({ apiLatency, skewPoints, softphone
   const skewData = skewPoints.map((p) => p.skewMs);
   const maxSkew = Math.max(...skewData.map(Math.abs), 0);
 
-  const labelFormat: Intl.DateTimeFormatOptions = useMemo(
-    () =>
-      skewPoints.length <= 15
-        ? { hour: '2-digit', hour12: false, minute: '2-digit', second: '2-digit' }
-        : { hour: '2-digit', hour12: false, minute: '2-digit' },
-    [skewPoints.length],
-  );
-  const skewLabels = skewPoints.map((p, i) => {
-    const base = new Date(p._ts).toLocaleTimeString([], labelFormat);
-    return skewPoints.length <= 15 ? base : `${base}#${String(i)}`;
-  });
-  const tickEvery = Math.max(1, Math.floor(skewLabels.length / 10));
+  const skewDates = skewPoints.map((p) => new Date(p._ts));
 
   const filteredLatency = apiLatency.filter((p) => !LATENCY_API_FILTER.has(p.apiName));
 
@@ -375,14 +396,10 @@ const MetricsPanel: FC<MetricsPanelProps> = ({ apiLatency, skewPoints, softphone
   const hasSlowOrFailed = aggregated.some((a) => a.failCount > 0 || a.avgMs > LATENCY_WARNING_THRESHOLD);
 
   const sortedLatency = [...filteredLatency].sort((a, b) => a._ts - b._ts);
-  const latencyLabels = sortedLatency.map((p, i) => {
-    const base = new Date(p._ts).toLocaleTimeString([], labelFormat);
-    return sortedLatency.length <= 15 ? base : `${base}#L${String(i)}`;
-  });
+  const latencyDates = sortedLatency.map((p) => new Date(p._ts));
   const latencyData = sortedLatency.map((p) => p.latencyMs);
   const failedOverlay = sortedLatency.map((p) => (p.status === 'failed' ? p.latencyMs : null));
   const hasFailedCalls = failedOverlay.some((v) => v !== null);
-  const latencyTickEvery = Math.max(1, Math.floor(latencyLabels.length / 10));
 
   // Softphone data preparation
   const inputMetrics = useMemo(
@@ -395,70 +412,108 @@ const MetricsPanel: FC<MetricsPanelProps> = ({ apiLatency, skewPoints, softphone
   );
   const hasSoftphoneData = softphoneMetrics.length > 0;
   const hasPacketLoss = softphoneMetrics.some((m) => m.packetsLost > 0);
-  const hasAnyFailure = softphoneReport
-    ? Object.entries(softphoneReport).some(([key, val]) => key.endsWith('Failure') && val === true)
-    : false;
+  const hasAnyFailure = softphoneReports.some((report) =>
+    Object.entries(report).some(([key, val]) => key.endsWith('Failure') && val === true),
+  );
 
-  // Time range zoom slider — shared across both stream tabs.
-  // Use the longer stream to define the slider range so the position is preserved when switching tabs.
-  const maxStreamLength = Math.max(inputMetrics.length, outputMetrics.length);
+  /**
+   * Formats a duration in milliseconds as "Xm Ys" or "Ys".
+   *
+   * @param ms - Duration in milliseconds.
+   * @returns Human-readable duration string.
+   */
+  const formatDuration = (ms: number): string => {
+    const totalSec = Math.round(ms / 1_000);
+    const min = Math.floor(totalSec / 60);
+    const sec = totalSec % 60;
+    return min > 0 ? `${String(min)}m ${String(sec)}s` : `${String(sec)}s`;
+  };
+
+  /** Aggregated call summary stats across all softphone reports */
+  const overallCallSummary = useMemo(() => {
+    const totalCalls = softphoneReports.length;
+    if (totalCalls === 0) return null;
+    const totalDurationMs = softphoneReports.reduce((sum, r) => sum + r.talkingTimeMs, 0);
+    const avgDurationMs = Math.round(totalDurationMs / totalCalls);
+    const totalFailures = softphoneReports.filter((r) =>
+      Object.entries(r).some(([key, val]) => key.endsWith('Failure') && val === true),
+    ).length;
+    const avg = (fn: (r: SoftphoneCallReport) => number): number =>
+      Math.round(softphoneReports.reduce((s, r) => s + fn(r), 0) / totalCalls);
+    const max = (fn: (r: SoftphoneCallReport) => number): number => Math.max(...softphoneReports.map(fn));
+
+    return {
+      avgDurationMs,
+      avgGum: avg((r) => r.gumTimeMs),
+      avgHandshaking: avg((r) => r.handshakingTimeMs),
+      avgIce: avg((r) => r.iceCollectionTimeMs),
+      avgPreTalking: avg((r) => r.preTalkingTimeMs),
+      avgSignalling: avg((r) => r.signallingConnectTimeMs),
+      maxGum: max((r) => r.gumTimeMs),
+      maxHandshaking: max((r) => r.handshakingTimeMs),
+      maxIce: max((r) => r.iceCollectionTimeMs),
+      maxPreTalking: max((r) => r.preTalkingTimeMs),
+      maxSignalling: max((r) => r.signallingConnectTimeMs),
+      totalCalls,
+      totalDurationMs,
+      totalFailures,
+    };
+  }, [softphoneReports]);
+
+  // Time range zoom slider — timestamp-based so both streams share the same
+  // time axis covering the earliest-to-latest across input AND output.
   const activeMetrics = webrtcStreamTab === 'audio_input' ? inputMetrics : outputMetrics;
-  const totalPoints = activeMetrics.length;
   const [zoomRange, setZoomRange] = useState<[number, number]>([0, 0]);
   const prevZoomKeyRef = useRef('');
 
-  // Reset zoom only when the overall data changes (not on tab switch)
-  const zoomKey = String(maxStreamLength);
+  // Compute overall time bounds across both streams (epoch ms)
+  const overallTimeBounds = useMemo<[number, number]>(() => {
+    const allTimestamps = softphoneMetrics.map((m) => new Date(m.timestamp).getTime());
+    if (allTimestamps.length === 0) return [0, 0];
+    return [Math.min(...allTimestamps), Math.max(...allTimestamps)];
+  }, [softphoneMetrics]);
+
+  // Reset zoom when the data changes (new file loaded)
+  const zoomKey = `${String(overallTimeBounds[0])}_${String(overallTimeBounds[1])}`;
   if (prevZoomKeyRef.current !== zoomKey) {
     prevZoomKeyRef.current = zoomKey;
-    const newRange: [number, number] = [0, Math.max(0, maxStreamLength - 1)];
-    if (zoomRange[0] !== newRange[0] || zoomRange[1] !== newRange[1]) {
-      setZoomRange(newRange);
+    if (zoomRange[0] !== overallTimeBounds[0] || zoomRange[1] !== overallTimeBounds[1]) {
+      setZoomRange(overallTimeBounds);
     }
   }
 
-  // Clamp zoom range to the active stream's actual length and slice
+  // Filter active stream to the zoom time range
   const zoomedMetrics = useMemo(() => {
-    if (totalPoints === 0) return [];
-    const clampedStart = Math.min(zoomRange[0], totalPoints - 1);
-    const clampedEnd = Math.min(zoomRange[1], totalPoints - 1);
-    return activeMetrics.slice(clampedStart, clampedEnd + 1);
-  }, [activeMetrics, zoomRange, totalPoints]);
+    if (activeMetrics.length === 0) return [];
+    return activeMetrics.filter((m) => {
+      const t = new Date(m.timestamp).getTime();
+      return t >= zoomRange[0] && t <= zoomRange[1];
+    });
+  }, [activeMetrics, zoomRange]);
 
-  // Build x-axis labels from zoomed data
-  const zoomedLabels = useMemo(
-    () =>
-      zoomedMetrics.map((p, i) => {
-        const base = new Date(p.timestamp).toLocaleTimeString([], labelFormat);
-        return zoomedMetrics.length <= 15 ? base : `${base}#W${String(i)}`;
-      }),
-    [zoomedMetrics, labelFormat],
-  );
-  const zoomedTickEvery = Math.max(1, Math.floor(zoomedLabels.length / 10));
+  // Date array for the time-scale x-axis
+  const zoomedDates = useMemo(() => zoomedMetrics.map((p) => new Date(p.timestamp)), [zoomedMetrics]);
 
-  // Slider marks — based on the longer stream so they stay consistent across tabs
+  // Slider marks — evenly spaced across the overall time range
   const sliderMarks = useMemo(() => {
-    if (maxStreamLength <= 1) return [];
-    // Use whichever stream is longer for mark timestamps
-    const referenceMetrics = outputMetrics.length >= inputMetrics.length ? outputMetrics : inputMetrics;
-    const markCount = Math.min(5, maxStreamLength);
-    const step = (maxStreamLength - 1) / (markCount - 1);
+    const [tMin, tMax] = overallTimeBounds;
+    if (tMin === tMax) return [];
+    const markCount = 5;
+    const step = (tMax - tMin) / (markCount - 1);
     return Array.from({ length: markCount }, (_, i) => {
-      const idx = Math.round(i * step);
-      const ts = referenceMetrics[idx]?.timestamp;
+      const value = Math.round(tMin + i * step);
       return {
-        label: ts
-          ? new Date(ts).toLocaleTimeString([], {
-              hour: '2-digit',
-              hour12: false,
-              minute: '2-digit',
-              second: '2-digit',
-            })
-          : '',
-        value: idx,
+        label: new Date(value).toLocaleTimeString([], {
+          hour: '2-digit',
+          hour12: false,
+          minute: '2-digit',
+          second: '2-digit',
+          timeZone: 'UTC',
+        }),
+        value,
       };
     });
-  }, [maxStreamLength, inputMetrics, outputMetrics]);
+  }, [overallTimeBounds]);
 
   const sectionWarnings: Record<ChartSectionId, boolean> = {
     'clock-skew': maxSkew > SKEW_WARNING_THRESHOLD,
@@ -595,7 +650,12 @@ const MetricsPanel: FC<MetricsPanelProps> = ({ apiLatency, skewPoints, softphone
             Clock Skew Over Time
           </Typography>
           {maxSkew > SKEW_WARNING_THRESHOLD && (
-            <Chip color="warning" label={`Max skew: ${maxSkew.toLocaleString()} ms`} size="small" />
+            <Tooltip
+              arrow
+              title="Skew above 1,000 ms can cause missed state transitions, phantom 'missed' contacts, and inaccurate historical reporting. Verify NTP sync on the workstation."
+            >
+              <Chip color="warning" label={`Max skew: ${maxSkew.toLocaleString()} ms`} size="small" />
+            </Tooltip>
           )}
         </Stack>
         <Typography
@@ -664,16 +724,22 @@ const MetricsPanel: FC<MetricsPanelProps> = ({ apiLatency, skewPoints, softphone
                 slots={{ tooltip: CustomSkewTooltip }}
                 xAxis={[
                   {
-                    data: skewLabels,
-                    scaleType: 'point',
-                    tickLabelInterval: (_v: unknown, i: number) => i % tickEvery === 0,
+                    data: skewDates,
+                    scaleType: 'time',
                     tickLabelStyle: { fontSize: 10 },
-                    valueFormatter: (value: string) => value.split('#')[0],
+                    valueFormatter: (value: Date) =>
+                      value.toLocaleTimeString([], {
+                        hour: '2-digit',
+                        hour12: false,
+                        minute: '2-digit',
+                        second: '2-digit',
+                        timeZone: 'UTC',
+                      }),
                   },
                 ]}
                 yAxis={[{ label: 'Skew (ms)' }]}
               >
-                <StateBackgroundBands labels={skewLabels} skewPoints={skewPoints} />
+                <StateBackgroundBands dates={skewDates} skewPoints={skewPoints} />
               </LineChart>
             </SkewDataContext>
             <Stack
@@ -710,6 +776,7 @@ const MetricsPanel: FC<MetricsPanelProps> = ({ apiLatency, skewPoints, softphone
           </>
         )}
       </Box>
+      <Divider />
       {/* API latency time series */}
       <Box
         data-section="latency-time-series"
@@ -718,15 +785,38 @@ const MetricsPanel: FC<MetricsPanelProps> = ({ apiLatency, skewPoints, softphone
         }}
         sx={{ scrollMarginTop: '56px' }}
       >
-        <Typography
+        <Stack
+          direction="row"
           sx={{
-            fontWeight: 'bold',
+            alignItems: 'center',
+            gap: 1,
             mb: 1,
           }}
-          variant="subtitle1"
         >
-          API Latency Over Time
-        </Typography>
+          <Typography
+            sx={{
+              fontWeight: 'bold',
+            }}
+            variant="subtitle1"
+          >
+            API Latency Over Time
+          </Typography>
+          {hasSlowOrFailed && (
+            <Tooltip
+              arrow
+              title="One or more API calls averaged above 500 ms or returned failures. This may indicate network congestion, server-side throttling, or DNS resolution delays."
+            >
+              <Chip color="warning" label="Slow or failed calls detected" size="small" />
+            </Tooltip>
+          )}
+        </Stack>
+        {staleApiSendCount > 0 && (
+          <Alert severity="info" sx={{ mb: 1 }}>
+            {staleApiSendCount} orphaned API {staleApiSendCount === 1 ? 'call was' : 'calls were'} excluded from latency
+            charts — {staleApiSendCount === 1 ? 'a send was' : 'sends were'} logged without a reply within 30 seconds,
+            likely due to a network interruption or WebSocket reconnection.
+          </Alert>
+        )}
         <Typography
           sx={{
             color: 'text.secondary',
@@ -805,11 +895,17 @@ const MetricsPanel: FC<MetricsPanelProps> = ({ apiLatency, skewPoints, softphone
               slots={{ tooltip: CustomLatencyTooltip }}
               xAxis={[
                 {
-                  data: latencyLabels,
-                  scaleType: 'point',
-                  tickLabelInterval: (_v: unknown, i: number) => i % latencyTickEvery === 0,
+                  data: latencyDates,
+                  scaleType: 'time',
                   tickLabelStyle: { fontSize: 10 },
-                  valueFormatter: (value: string) => value.split('#')[0],
+                  valueFormatter: (value: Date) =>
+                    value.toLocaleTimeString([], {
+                      hour: '2-digit',
+                      hour12: false,
+                      minute: '2-digit',
+                      second: '2-digit',
+                      timeZone: 'UTC',
+                    }),
                 },
               ]}
               yAxis={[
@@ -827,6 +923,7 @@ const MetricsPanel: FC<MetricsPanelProps> = ({ apiLatency, skewPoints, softphone
           </LatencyDataContext>
         )}
       </Box>
+      <Divider />
       {/* API latency aggregated chart */}
       <Box
         data-section="latency-aggregated"
@@ -851,7 +948,14 @@ const MetricsPanel: FC<MetricsPanelProps> = ({ apiLatency, skewPoints, softphone
           >
             API Call Latency (Aggregated)
           </Typography>
-          {hasSlowOrFailed && <Chip color="warning" label="Slow or failed calls detected" size="small" />}
+          {hasSlowOrFailed && (
+            <Tooltip
+              arrow
+              title="One or more API calls averaged above 500 ms or returned failures. This may indicate network congestion, server-side throttling, or DNS resolution delays."
+            >
+              <Chip color="warning" label="Slow or failed calls detected" size="small" />
+            </Tooltip>
+          )}
         </Stack>
         <Typography
           sx={{
@@ -924,6 +1028,7 @@ const MetricsPanel: FC<MetricsPanelProps> = ({ apiLatency, skewPoints, softphone
           />
         )}
       </Box>
+      <Divider />
       {/* WebRTC metrics section */}
       <Box
         data-section="webrtc-metrics"
@@ -1014,7 +1119,7 @@ const MetricsPanel: FC<MetricsPanelProps> = ({ apiLatency, skewPoints, softphone
             </SegmentedTabsCompact>
 
             {/* Time range zoom slider */}
-            {maxStreamLength > 1 && (
+            {overallTimeBounds[0] < overallTimeBounds[1] && (
               <Box
                 sx={{
                   bgcolor: 'action.hover',
@@ -1037,8 +1142,8 @@ const MetricsPanel: FC<MetricsPanelProps> = ({ apiLatency, skewPoints, softphone
                   <Slider
                     disableSwap
                     marks={sliderMarks}
-                    max={maxStreamLength - 1}
-                    min={0}
+                    max={overallTimeBounds[1]}
+                    min={overallTimeBounds[0]}
                     onChange={(_e, value) => {
                       const [start, end] = value as [number, number];
                       setZoomRange([start, end]);
@@ -1048,10 +1153,10 @@ const MetricsPanel: FC<MetricsPanelProps> = ({ apiLatency, skewPoints, softphone
                     value={zoomRange}
                     valueLabelDisplay="off"
                   />
-                  {(zoomRange[0] > 0 || zoomRange[1] < maxStreamLength - 1) && (
+                  {(zoomRange[0] > overallTimeBounds[0] || zoomRange[1] < overallTimeBounds[1]) && (
                     <Button
                       onClick={() => {
-                        setZoomRange([0, maxStreamLength - 1]);
+                        setZoomRange(overallTimeBounds);
                       }}
                       size="small"
                       variant="text"
@@ -1086,16 +1191,34 @@ const MetricsPanel: FC<MetricsPanelProps> = ({ apiLatency, skewPoints, softphone
                     ]}
                     xAxis={[
                       {
-                        data: zoomedLabels,
-                        scaleType: 'point',
-                        tickLabelInterval: (_v: unknown, i: number) => i % zoomedTickEvery === 0,
+                        data: zoomedDates,
+                        scaleType: 'time',
                         tickLabelStyle: { fontSize: 10 },
-                        valueFormatter: (value: string) => value.split('#')[0],
+                        valueFormatter: (value: Date) =>
+                          value.toLocaleTimeString([], {
+                            hour: '2-digit',
+                            hour12: false,
+                            minute: '2-digit',
+                            second: '2-digit',
+                            timeZone: 'UTC',
+                          }),
                       },
                     ]}
-                    yAxis={[{ label: 'Level' }]}
+                    yAxis={[
+                      {
+                        label: 'Level',
+                        valueFormatter: (v: number) =>
+                          v >= 10_000
+                            ? `${String(Math.round(v / 1_000))}k`
+                            : v >= 1_000
+                              ? `${(v / 1_000).toFixed(1)}k`
+                              : String(Math.round(v)),
+                      },
+                    ]}
                   />
                 </Box>
+
+                <Divider />
 
                 {/* Packets chart */}
                 <Box>
@@ -1124,16 +1247,34 @@ const MetricsPanel: FC<MetricsPanelProps> = ({ apiLatency, skewPoints, softphone
                     ]}
                     xAxis={[
                       {
-                        data: zoomedLabels,
-                        scaleType: 'point',
-                        tickLabelInterval: (_v: unknown, i: number) => i % zoomedTickEvery === 0,
+                        data: zoomedDates,
+                        scaleType: 'time',
                         tickLabelStyle: { fontSize: 10 },
-                        valueFormatter: (value: string) => value.split('#')[0],
+                        valueFormatter: (value: Date) =>
+                          value.toLocaleTimeString([], {
+                            hour: '2-digit',
+                            hour12: false,
+                            minute: '2-digit',
+                            second: '2-digit',
+                            timeZone: 'UTC',
+                          }),
                       },
                     ]}
-                    yAxis={[{ label: 'Packets' }]}
+                    yAxis={[
+                      {
+                        label: 'Packets',
+                        valueFormatter: (v: number) =>
+                          v >= 10_000
+                            ? `${String(Math.round(v / 1_000))}k`
+                            : v >= 1_000
+                              ? `${(v / 1_000).toFixed(1)}k`
+                              : String(Math.round(v)),
+                      },
+                    ]}
                   />
                 </Box>
+
+                <Divider />
 
                 {/* Jitter Buffer & RTT chart */}
                 <Box>
@@ -1165,68 +1306,211 @@ const MetricsPanel: FC<MetricsPanelProps> = ({ apiLatency, skewPoints, softphone
                     ]}
                     xAxis={[
                       {
-                        data: zoomedLabels,
-                        scaleType: 'point',
-                        tickLabelInterval: (_v: unknown, i: number) => i % zoomedTickEvery === 0,
+                        data: zoomedDates,
+                        scaleType: 'time',
                         tickLabelStyle: { fontSize: 10 },
-                        valueFormatter: (value: string) => value.split('#')[0],
+                        valueFormatter: (value: Date) =>
+                          value.toLocaleTimeString([], {
+                            hour: '2-digit',
+                            hour12: false,
+                            minute: '2-digit',
+                            second: '2-digit',
+                            timeZone: 'UTC',
+                          }),
                       },
                     ]}
-                    yAxis={[{ label: 'ms' }]}
+                    yAxis={[{ label: 'ms', valueFormatter: (v: number) => String(Math.round(v)) }]}
                   />
                 </Box>
               </Stack>
             )}
 
-            {/* Call Summary card (shared, not per-stream) */}
-            {softphoneReport && (
-              <Box
-                sx={{
-                  bgcolor: 'action.hover',
-                  borderRadius: 1,
-                  mt: 3,
-                  p: 2,
-                }}
-              >
-                <Typography sx={{ fontWeight: 'bold', mb: 1 }} variant="subtitle2">
-                  Call Summary
-                </Typography>
+            {/* Call Summary section */}
+            {softphoneReports.length > 0 && (
+              <Box sx={{ mt: 3 }}>
+                {/* Overall summary across all calls */}
                 <Box
                   sx={{
-                    columnGap: 3,
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-                    rowGap: 0.5,
+                    bgcolor: 'action.hover',
+                    borderRadius: 1,
+                    mb: 2,
+                    p: 2,
                   }}
                 >
-                  {[
-                    ['Call duration', `${(softphoneReport.talkingTimeMs / 1_000).toFixed(0)}s`],
-                    ['Mic acquisition', `${String(softphoneReport.gumTimeMs)} ms`],
-                    ['Initialisation', `${String(softphoneReport.initializationTimeMs)} ms`],
-                    ['ICE collection', `${String(softphoneReport.iceCollectionTimeMs)} ms`],
-                    ['Signalling', `${String(softphoneReport.signallingConnectTimeMs)} ms`],
-                    ['Handshaking', `${String(softphoneReport.handshakingTimeMs)} ms`],
-                    ['Pre-talking', `${String(softphoneReport.preTalkingTimeMs)} ms`],
-                  ].map(([label, value]) => (
-                    <Box key={label} sx={{ display: 'flex', gap: 1 }}>
-                      <Typography color="text.secondary" variant="caption">
-                        {label}:
+                  <Typography sx={{ fontWeight: 'bold', mb: 1 }} variant="subtitle2">
+                    Call Summary
+                  </Typography>
+                  {overallCallSummary && (
+                    <>
+                      <Box
+                        sx={{
+                          columnGap: 3,
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+                          rowGap: 0.5,
+                        }}
+                      >
+                        {(
+                          [
+                            ['Total calls', String(overallCallSummary.totalCalls)],
+                            ['Total duration', formatDuration(overallCallSummary.totalDurationMs)],
+                            ['Avg duration', formatDuration(overallCallSummary.avgDurationMs)],
+                            [
+                              'Calls with failures',
+                              overallCallSummary.totalFailures > 0 ? String(overallCallSummary.totalFailures) : 'None',
+                            ],
+                            [
+                              'Avg mic acquisition',
+                              `${String(overallCallSummary.avgGum)} / ${String(overallCallSummary.maxGum)} ms`,
+                            ],
+                            [
+                              'Avg ICE collection',
+                              `${String(overallCallSummary.avgIce)} / ${String(overallCallSummary.maxIce)} ms`,
+                            ],
+                            [
+                              'Avg signalling',
+                              `${String(overallCallSummary.avgSignalling)} / ${String(overallCallSummary.maxSignalling)} ms`,
+                            ],
+                            [
+                              'Avg handshaking',
+                              `${String(overallCallSummary.avgHandshaking)} / ${String(overallCallSummary.maxHandshaking)} ms`,
+                            ],
+                            [
+                              'Avg pre-talking',
+                              `${String(overallCallSummary.avgPreTalking)} / ${String(overallCallSummary.maxPreTalking)} ms`,
+                            ],
+                          ] satisfies [string, string][]
+                        ).map(([label, value]) => (
+                          <Box key={label} sx={{ display: 'flex', gap: 1 }}>
+                            <Typography color="text.secondary" variant="caption">
+                              {label}:
+                            </Typography>
+                            <Typography
+                              color={
+                                label === 'Calls with failures' && overallCallSummary.totalFailures > 0
+                                  ? 'error.main'
+                                  : undefined
+                              }
+                              variant="caption"
+                            >
+                              {value}
+                            </Typography>
+                          </Box>
+                        ))}
+                      </Box>
+                      <Typography color="text.secondary" sx={{ mt: 0.5 }} variant="caption">
+                        Setup times shown as avg / max across all calls.
                       </Typography>
-                      <Typography variant="caption">{value}</Typography>
-                    </Box>
-                  ))}
+                    </>
+                  )}
                 </Box>
-                {hasAnyFailure && (
-                  <Box sx={{ mt: 1 }}>
-                    <Typography color="error.main" variant="caption">
-                      Failures:{' '}
-                      {Object.entries(softphoneReport)
-                        .filter(([key, val]) => key.endsWith('Failure') && val === true)
-                        .map(([key]) => key.replace('Failure', ''))
-                        .join(', ')}
-                    </Typography>
-                  </Box>
-                )}
+
+                {/* Individual call accordions */}
+                {softphoneReports.map((report, idx) => {
+                  const callHasFailure = Object.entries(report).some(
+                    ([key, val]) => key.endsWith('Failure') && val === true,
+                  );
+                  const hasHighSetupTime =
+                    report.iceCollectionTimeMs > SETUP_WARNING_THRESHOLD ||
+                    report.handshakingTimeMs > SETUP_WARNING_THRESHOLD ||
+                    report.signallingConnectTimeMs > SETUP_WARNING_THRESHOLD ||
+                    report.gumTimeMs > SETUP_WARNING_THRESHOLD ||
+                    report.preTalkingTimeMs > SETUP_WARNING_THRESHOLD;
+                  const isConcerning = callHasFailure || hasHighSetupTime;
+                  const callStart = report.callStartTime
+                    ? new Date(report.callStartTime).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        hour12: false,
+                        minute: '2-digit',
+                        second: '2-digit',
+                        timeZone: 'UTC',
+                      })
+                    : '—';
+                  const callEnd = report.callEndTime
+                    ? new Date(report.callEndTime).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        hour12: false,
+                        minute: '2-digit',
+                        second: '2-digit',
+                        timeZone: 'UTC',
+                      })
+                    : '—';
+                  const durationSec = Math.round(report.talkingTimeMs / 1_000);
+                  const durationMin = Math.floor(durationSec / 60);
+                  const durationRemSec = durationSec % 60;
+                  const durationStr =
+                    durationMin > 0
+                      ? `${String(durationMin)}m ${String(durationRemSec)}s`
+                      : `${String(durationRemSec)}s`;
+
+                  return (
+                    <Accordion
+                      defaultExpanded={softphoneReports.length <= 2}
+                      key={`call-${String(idx)}`}
+                      sx={{
+                        '&::before': { display: 'none' },
+                        ...(isConcerning && {
+                          borderLeft: 3,
+                          borderLeftColor: callHasFailure ? 'error.main' : 'warning.main',
+                        }),
+                      }}
+                      variant="outlined"
+                    >
+                      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                          <Typography sx={{ fontWeight: 'bold' }} variant="body2">
+                            Call {String(idx + 1)}
+                          </Typography>
+                          <Typography color="text.secondary" variant="caption">
+                            {callStart} → {callEnd} ({durationStr})
+                          </Typography>
+                          {callHasFailure && <Chip color="error" label="Failure" size="small" />}
+                          {!callHasFailure && hasHighSetupTime && (
+                            <Chip color="warning" label="High setup time" size="small" />
+                          )}
+                        </Stack>
+                      </AccordionSummary>
+                      <AccordionDetails>
+                        <Box
+                          sx={{
+                            columnGap: 3,
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+                            rowGap: 0.5,
+                          }}
+                        >
+                          {[
+                            ['Call duration', `${(report.talkingTimeMs / 1_000).toFixed(0)}s`],
+                            ['Mic acquisition', `${String(report.gumTimeMs)} ms`],
+                            ['Initialisation', `${String(report.initializationTimeMs)} ms`],
+                            ['ICE collection', `${String(report.iceCollectionTimeMs)} ms`],
+                            ['Signalling', `${String(report.signallingConnectTimeMs)} ms`],
+                            ['Handshaking', `${String(report.handshakingTimeMs)} ms`],
+                            ['Pre-talking', `${String(report.preTalkingTimeMs)} ms`],
+                          ].map(([label, value]) => (
+                            <Box key={label} sx={{ display: 'flex', gap: 1 }}>
+                              <Typography color="text.secondary" variant="caption">
+                                {label}:
+                              </Typography>
+                              <Typography variant="caption">{value}</Typography>
+                            </Box>
+                          ))}
+                        </Box>
+                        {callHasFailure && (
+                          <Box sx={{ mt: 1 }}>
+                            <Typography color="error.main" variant="caption">
+                              Failures:{' '}
+                              {Object.entries(report)
+                                .filter(([key, val]) => key.endsWith('Failure') && val === true)
+                                .map(([key]) => key.replace('Failure', ''))
+                                .join(', ')}
+                            </Typography>
+                          </Box>
+                        )}
+                      </AccordionDetails>
+                    </Accordion>
+                  );
+                })}
               </Box>
             )}
           </>
