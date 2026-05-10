@@ -99,6 +99,9 @@ const CcpLogParser: FC = () => {
 
   const isSourceFiltered = activeFilter !== null;
   const isContactFiltered = currentFile?.contactFilter !== 'ALL' && currentFile?.contactFilter !== undefined;
+  const isLevelFiltered = currentFile?.levelFilter !== 'ALL' && currentFile?.levelFilter !== undefined;
+  const activeFilterCount = [isSourceFiltered, isContactFiltered, isLevelFiltered].filter(Boolean).length;
+  const hasActiveFilters = activeFilterCount > 0;
   const filterContext = [
     isSourceFiltered ? activeFilter.label : '',
     isContactFiltered
@@ -293,12 +296,30 @@ const CcpLogParser: FC = () => {
     updateCurrentFile((file) => ({
       ...file,
       activeTab: 'log',
+      highlightedKeys: new Set<number>(),
       levelFilter: level,
+      selectedSnapshotFromKey: null,
     }));
   };
 
   const handleContactFilterChange = (contactId: string): void => {
-    updateCurrentFile((file) => ({ ...file, contactFilter: contactId }));
+    updateCurrentFile((file) => ({
+      ...file,
+      contactFilter: contactId,
+      highlightedKeys: new Set<number>(),
+      selectedSnapshotFromKey: null,
+    }));
+  };
+
+  const handleClearAllFilters = (): void => {
+    updateCurrentFile((file) => ({
+      ...file,
+      contactFilter: 'ALL',
+      highlightedKeys: new Set<number>(),
+      levelFilter: 'ALL',
+      selectedSnapshotFromKey: null,
+      sourceFilterId: null,
+    }));
   };
 
   const handlePageDragEnter = (e: React.DragEvent): void => {
@@ -492,35 +513,120 @@ const CcpLogParser: FC = () => {
           </Alert>
         )}
 
-        {/* View tabs + summary chips on the same row */}
+        {/* View tabs + active filters + summary chips on the same row */}
         {currentFile && (
           <Stack
             direction="row"
             sx={{
               alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 1,
               justifyContent: 'space-between',
             }}
           >
-            <SegmentedTabsCompact
-              indicatorColor="primary"
-              onChange={handleViewTabChange}
-              scrollButtons="auto"
-              textColor="primary"
-              value={currentFile.activeTab}
-              variant="scrollable"
-            >
-              {VIEW_TABS.map((tab) => (
-                <SegmentedTabCompact key={tab.value} label={tab.label} value={tab.value} />
-              ))}
-            </SegmentedTabsCompact>
             <Stack
               direction="row"
               sx={{
                 alignItems: 'center',
-                flexShrink: 0,
-                gap: 1,
-                pl: 2,
+                flexWrap: 'wrap',
+                gap: 1.5,
               }}
+            >
+              <SegmentedTabsCompact
+                indicatorColor="primary"
+                onChange={handleViewTabChange}
+                scrollButtons="auto"
+                textColor="primary"
+                value={currentFile.activeTab}
+                variant="scrollable"
+              >
+                {VIEW_TABS.map((tab) => (
+                  <SegmentedTabCompact key={tab.value} label={tab.label} value={tab.value} />
+                ))}
+              </SegmentedTabsCompact>
+              {hasActiveFilters && (
+                <Stack
+                  direction="row"
+                  sx={(theme) => ({
+                    alignItems: 'center',
+                    background: 'linear-gradient(180deg, #F8FAFC 0%, #F1F5F9 100%)',
+                    border: '1px solid #E2E8F0',
+                    borderRadius: theme.general.borderRadiusLg,
+                    boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.7)',
+                    gap: 0.75,
+                    minHeight: 46,
+                    px: 1.5,
+                    py: 0.5,
+                    ...theme.applyStyles('dark', {
+                      background: 'linear-gradient(180deg, #151B2B 0%, #131825 100%)',
+                      border: '1px solid #1E2742',
+                      boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.03)',
+                    }),
+                  })}
+                >
+                  <Typography color="text.secondary" sx={{ mr: 0.25 }} variant="caption">
+                    Filters:
+                  </Typography>
+                  {isLevelFiltered && (
+                    <Chip
+                      label={
+                        currentFile.levelFilter === 'ERROR' ? 'Level: ERROR only' : `Level: ${currentFile.levelFilter}+`
+                      }
+                      onDelete={() => updateCurrentFile((file) => ({ ...file, levelFilter: 'ALL' }))}
+                      size="small"
+                      variant="outlined"
+                    />
+                  )}
+                  {isSourceFiltered && (
+                    <Chip
+                      label={`Source: ${activeFilter.label}`}
+                      onDelete={() => handleSourceFilterChange(null)}
+                      size="small"
+                      variant="outlined"
+                    />
+                  )}
+                  {isContactFiltered && (
+                    <Chip
+                      label={
+                        currentFile.parsedLog.contacts.find((c) => c.contactId === currentFile.contactFilter)?.label ??
+                        'Contact'
+                      }
+                      onDelete={() => handleContactFilterChange('ALL')}
+                      size="small"
+                      variant="outlined"
+                    />
+                  )}
+                  {activeFilterCount >= 2 && (
+                    <Button
+                      onClick={handleClearAllFilters}
+                      size="small"
+                      sx={{ minWidth: 'auto', ml: 0.25, textTransform: 'none' }}
+                      variant="text"
+                    >
+                      Clear all
+                    </Button>
+                  )}
+                </Stack>
+              )}
+            </Stack>
+            <Stack
+              direction="row"
+              sx={(theme) => ({
+                alignItems: 'center',
+                background: 'linear-gradient(180deg, #F8FAFC 0%, #F1F5F9 100%)',
+                border: '1px solid #E2E8F0',
+                borderRadius: theme.general.borderRadiusLg,
+                boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.7)',
+                flexWrap: 'wrap',
+                gap: 1,
+                minHeight: 46,
+                px: 1.5,
+                ...theme.applyStyles('dark', {
+                  background: 'linear-gradient(180deg, #151B2B 0%, #131825 100%)',
+                  border: '1px solid #1E2742',
+                  boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.03)',
+                }),
+              })}
             >
               <Tooltip arrow title={`Show all entries${filterSuffix}`}>
                 <Chip
@@ -666,7 +772,8 @@ const CcpLogParser: FC = () => {
                 apiLatency={currentFile.parsedLog.apiLatency}
                 skewPoints={currentFile.parsedLog.skewPoints}
                 softphoneMetrics={currentFile.parsedLog.softphoneMetrics}
-                softphoneReport={currentFile.parsedLog.softphoneReport}
+                softphoneReports={currentFile.parsedLog.softphoneReports}
+                staleApiSendCount={currentFile.parsedLog.staleApiSendCount}
               />
             </CardContent>
           </Card>
