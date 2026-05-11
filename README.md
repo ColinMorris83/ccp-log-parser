@@ -34,9 +34,16 @@ Clock skew, API latency, and WebRTC softphone metrics with interactive tooltips 
 
 ![Metrics charts](public/images/metrics.png)
 
+### Summary dashboard
+
+At-a-glance health assessment with traffic-light cards for CCP lifecycle, WebSocket, contacts, agent, API, clock skew, and softphone.
+
+![Summary dashboard](public/images/summary-tab.png)
+
 ## Features
 
 - **Drag & drop file loading** — drop one or more CCP log files onto the page, or use the file picker
+- **Summary dashboard** — at-a-glance health assessment with traffic-light cards for CCP lifecycle, WebSocket connectivity, contacts, agent state, API latency, clock skew, and softphone quality
 - **Log table** — sortable, filterable, virtualised table powered by Material React Table
 - **Custom source filters** — create, edit, and delete filters with custom label/prefix pairs; persisted to localStorage
 - **Contact filter** — filter log entries by contact ID
@@ -104,6 +111,7 @@ src/
     MrtThemeProvider/ -- Material React Table theme wrapper
     SegmentedTabs/    -- Tab switcher for multi-file views
     SnapshotList/     -- Clickable API snapshot navigation list
+    SummaryPanel/     -- At-a-glance health dashboard with traffic-light section cards
   constants/          -- Shared constant values
   contexts/           -- React context providers (FilterContext)
   hooks/              -- Custom React hooks (useCustomFilters, useMrtTheme)

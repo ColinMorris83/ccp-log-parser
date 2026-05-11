@@ -10,9 +10,9 @@ import PowerSettingsNewOutlinedIcon from '@mui/icons-material/PowerSettingsNewOu
 import SupportAgentOutlinedIcon from '@mui/icons-material/SupportAgentOutlined';
 import WarningAmberOutlinedIcon from '@mui/icons-material/WarningAmberOutlined';
 import { Box, Chip, Paper, Stack, Typography, type ChipProps } from '@mui/material';
-import { type FC, type ReactNode } from 'react';
+import { type FC, type ReactElement, type ReactNode } from 'react';
 
-import type { HealthStatus, LogSummary } from '../../models/logSummary';
+import type { CcpLifecycleSection, HealthStatus, LogSummary, WebSocketSection } from '../../models/logSummary';
 
 interface SummaryPanelProps {
   summary: LogSummary;
@@ -35,7 +35,7 @@ const HEALTH_CHIP_COLORS: Record<HealthStatus, ChipProps['color']> = {
 };
 
 /** Maps a health status to its icon component. */
-const HEALTH_ICONS: Record<HealthStatus, ReactNode> = {
+const HEALTH_ICONS: Record<HealthStatus, ReactElement> = {
   error: <ErrorOutlinedIcon fontSize="inherit" />,
   healthy: <CheckCircleOutlinedIcon fontSize="inherit" />,
   unknown: <HelpOutlinedIcon fontSize="inherit" />,
@@ -189,17 +189,9 @@ const MetricRow: FC<MetricRowProps> = ({ label, value }) => (
  * @returns JSX for the summary panel.
  */
 const SummaryPanel: FC<SummaryPanelProps> = ({ summary }) => {
-  const {
-    agent,
-    apiHealth,
-    ccpLifecycle,
-    clockHealth,
-    contacts,
-    overallHealth,
-    sessionWindow,
-    softphoneHealth,
-    webSocket,
-  } = summary;
+  const { agent, apiHealth, clockHealth, contacts, overallHealth, sessionWindow, softphoneHealth } = summary;
+  const ccpLifecycle: CcpLifecycleSection = summary.ccpLifecycle;
+  const webSocket: WebSocketSection = summary.webSocket;
 
   return (
     <Stack sx={{ gap: 3 }}>
