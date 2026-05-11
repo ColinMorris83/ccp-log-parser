@@ -191,7 +191,7 @@ const RE_BROWSER = /Browser: (\w+) Version: (\d+)/;
 
 /**
  * Builds the CCP lifecycle section by scanning log entries for Amazon Connect's
- * own initialisation signals (no ESURE_CCP namespace dependency).
+ * own initialisation signals
  *
  * @param parsedLog - The fully parsed CCP log.
  * @returns CCP lifecycle section.
