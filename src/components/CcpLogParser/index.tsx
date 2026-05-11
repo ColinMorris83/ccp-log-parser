@@ -23,13 +23,16 @@ import { FileUploadButton } from '../FileUploadButton';
 import { SegmentedTabCompact, SegmentedTabsCompact } from '../SegmentedTabs';
 import type { LogLevel, ParsedCcpLog } from '../../models/ccpLogParser';
 import { useFilterContext } from '../../contexts/FilterContext';
+import { buildLogSummary } from '../../utils/logSummary';
 import DropZone from '../DropZone';
 import LogTable from '../LogTable';
 import MetricsPanel from '../MetricsPanel';
 import SnapshotList from '../SnapshotList';
+import SummaryPanel from '../SummaryPanel';
 import { parseCcpLog } from '../../utils/logParser';
 
 const VIEW_TABS = [
+  { label: 'Summary', value: 'summary' },
   { label: 'Snapshots & Log', value: 'log' },
   { label: 'Metrics', value: 'metrics' },
 ] as const;
@@ -81,6 +84,10 @@ const CcpLogParser: FC = () => {
 
   const entries = currentFile?.parsedLog.entries;
   const contactFilter = currentFile?.contactFilter;
+  const parsedLog = currentFile?.parsedLog;
+
+  /** Build the log summary for the current file (memoised on the parsedLog reference). */
+  const logSummary = useMemo(() => (parsedLog ? buildLogSummary(parsedLog) : null), [parsedLog]);
 
   /** Recompute entry / error / warning counts scoped to the active source and contact filters. */
   const filteredCounts = useMemo(() => {
@@ -131,7 +138,7 @@ const CcpLogParser: FC = () => {
       try {
         const parsedLog = parseCcpLog(raw, filename);
         toAdd.push({
-          activeTab: 'log',
+          activeTab: 'summary',
           contactFilter: 'ALL',
           highlightedKeys: new Set<number>(),
           levelFilter: 'ALL' as const,
@@ -194,7 +201,7 @@ const CcpLogParser: FC = () => {
           const newFiles = [
             ...prev,
             ...parsedResults.map((parsedLog) => ({
-              activeTab: 'log' as const,
+              activeTab: 'summary' as const,
               contactFilter: 'ALL',
               highlightedKeys: new Set<number>(),
               levelFilter: 'ALL' as const,
@@ -775,6 +782,15 @@ const CcpLogParser: FC = () => {
                 softphoneReports={currentFile.parsedLog.softphoneReports}
                 staleApiSendCount={currentFile.parsedLog.staleApiSendCount}
               />
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Tab: Summary */}
+        {currentFile?.activeTab === 'summary' && logSummary && (
+          <Card sx={{ height: '100%', overflow: 'auto' }}>
+            <CardContent>
+              <SummaryPanel summary={logSummary} />
             </CardContent>
           </Card>
         )}

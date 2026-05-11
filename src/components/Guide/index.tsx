@@ -211,6 +211,7 @@ const Guide: FC = () => {
                 {[
                   { id: 'what-are-ccp-logs', label: 'What are CCP Logs?' },
                   { id: 'getting-started', label: 'Getting Started' },
+                  { id: 'summary-dashboard', label: 'Summary Dashboard' },
                   { id: 'log-table', label: 'Log Table' },
                   { id: 'snapshots', label: 'Snapshots' },
                   { id: 'metrics-charts', label: 'Metrics Charts' },
@@ -279,11 +280,12 @@ const Guide: FC = () => {
                 Navigating views
               </Typography>
               <Typography sx={{ mb: 1 }} variant="body2">
-                Each loaded file has two views, toggled via the compact tab bar below the file tabs:
+                Each loaded file has three views, toggled via the compact tab bar below the file tabs:
               </Typography>
               <BulletList
                 items={[
-                  'Snapshots & Log — the main view with the snapshot sidebar and filterable log table.',
+                  'Summary — the default view when a file is loaded. Shows an at-a-glance health dashboard with traffic-light cards for each infrastructure area.',
+                  'Snapshots & Log — the snapshot sidebar and filterable log table.',
                   'Metrics — charts for clock skew, API latency, and WebRTC softphone quality.',
                 ]}
               />
@@ -308,7 +310,63 @@ const Guide: FC = () => {
 
             <Divider />
 
-            {/* 3. Log Table */}
+            {/* 3. Summary Dashboard */}
+            <Section id="summary-dashboard" title="Summary Dashboard">
+              <Typography sx={{ mb: 1 }} variant="body2">
+                The Summary tab is the first thing you see after loading a log file. It provides a quick health
+                assessment across seven infrastructure areas, so you can immediately tell whether the session was
+                healthy or where to dig deeper.
+              </Typography>
+              <Screenshot
+                alt="Summary dashboard"
+                caption="The Summary tab — at-a-glance health assessment with traffic-light cards for each infrastructure area."
+                src={`${buildConfig.basePath}images/summary-tab.png`}
+              />
+
+              <Typography sx={{ fontWeight: 600, mb: 0.5, mt: 2 }} variant="subtitle2">
+                Overall health banner
+              </Typography>
+              <Typography sx={{ mb: 1 }} variant="body2">
+                The banner at the top shows the overall verdict — <strong>Healthy</strong>,{' '}
+                <strong>Warnings Detected</strong>, <strong>Issues Detected</strong>, or <strong>No Data</strong> —
+                along with the session duration and total entry/error/warning counts.
+              </Typography>
+
+              <Typography sx={{ fontWeight: 600, mb: 0.5, mt: 2 }} variant="subtitle2">
+                Section cards
+              </Typography>
+              <Typography sx={{ mb: 0.5 }} variant="body2">
+                Below the banner, each card represents an infrastructure area with a traffic-light health chip:
+              </Typography>
+              <BulletList
+                items={[
+                  'CCP Lifecycle — whether the CCP initialised successfully, iframe init time, StreamsJS and CCP Streams versions, and detected browser.',
+                  'WebSocket — connection open/close counts, deep heartbeat activity, and any scheduled reconnections.',
+                  'Contacts — total contacts detected in the session.',
+                  'Agent — snapshot count and number of agent state transitions.',
+                  'AWS API Calls — total calls, average/max latency, failed calls, and orphaned sends.',
+                  'Clock Skew — sample count, average and maximum skew between workstation and server clocks.',
+                  'Softphone — call count, average talking time, failure count, and packet loss detection.',
+                ]}
+              />
+
+              <Typography sx={{ fontWeight: 600, mb: 0.5, mt: 2 }} variant="subtitle2">
+                Health indicators
+              </Typography>
+              <BulletList
+                items={[
+                  'Healthy (green) — everything looks normal for that section.',
+                  'Warning (amber) — non-critical issues detected (e.g. high clock skew, elevated API latency, packet loss).',
+                  'Error (red) — problems that likely affected the agent experience (e.g. API failures, softphone failures).',
+                  'No Data (grey) — no relevant log entries found for that section.',
+                ]}
+              />
+            </Section>
+
+            <Divider />
+
+            {/* 4. Log Table */}
+
             <Section id="log-table" title="Log Table">
               <Typography sx={{ mb: 1 }} variant="body2">
                 The log table shows each log entry as a single row. The format of each entry is:
@@ -347,7 +405,7 @@ const Guide: FC = () => {
 
             <Divider />
 
-            {/* 4. Snapshots */}
+            {/* 5. Snapshots */}
             <Section id="snapshots" title="Snapshots">
               <Typography sx={{ mb: 1 }} variant="body2">
                 The CCP periodically retrieves an <Code>AgentSnapshot</Code> from Amazon Connect. Each snapshot contains
@@ -371,7 +429,7 @@ const Guide: FC = () => {
 
             <Divider />
 
-            {/* 5. Metrics Charts */}
+            {/* 6. Metrics Charts */}
             <Section id="metrics-charts" title="Metrics Charts">
               <Typography sx={{ mb: 1 }} variant="body2">
                 Switch to the <strong>Metrics</strong> tab to see visual charts derived from the log data. Four sections
@@ -431,7 +489,7 @@ const Guide: FC = () => {
 
             <Divider />
 
-            {/* 6. WebRTC Metrics */}
+            {/* 7. WebRTC Metrics */}
             <Section id="webrtc-metrics" title="WebRTC Metrics">
               <Typography sx={{ mb: 1 }} variant="body2">
                 When a softphone call is present in the log, the WebRTC Metrics section shows audio quality data per
@@ -479,11 +537,18 @@ const Guide: FC = () => {
 
             <Divider />
 
-            {/* 7. Custom Filters */}
+            {/* 8. Custom Filters */}
             <Section id="custom-filters" title="Custom Filters">
               <Typography sx={{ mb: 1 }} variant="body2">
-                Custom filters let you isolate log entries by their text prefix. This is useful for focusing on a
-                specific CCP component (e.g. <Code>softphone</Code>, <Code>ccp</Code>, <Code>signaling</Code>).
+                Custom filters let you isolate log entries by their text prefix. This is mainly useful if you have a
+                custom CCP that writes to the Amazon Connect logger using your own prefix or namespaces — for example,{' '}
+                <Code>CUSTOM_CCP: LIFECYCLE:</Code> or <Code>MY_APP: CHAT:</Code>. By creating filters for your custom
+                prefixes, you can quickly isolate your application&apos;s log entries from the noise of Amazon
+                Connect&apos;s own logging.
+              </Typography>
+              <Typography sx={{ mb: 1 }} variant="body2">
+                They can also be used to filter by built-in CCP component names such as <Code>softphone</Code>,{' '}
+                <Code>ccp</Code>, or <Code>signaling</Code>.
               </Typography>
               <BulletList
                 items={[
@@ -504,7 +569,7 @@ const Guide: FC = () => {
 
             <Divider />
 
-            {/* 8. Troubleshooting */}
+            {/* 9. Troubleshooting */}
             <Section id="troubleshooting" title="Troubleshooting Guide">
               <Typography sx={{ mb: 1.5 }} variant="body2">
                 Below are common CCP connectivity problems and the log patterns to look for, adapted from the{' '}
